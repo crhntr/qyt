@@ -10,12 +10,12 @@ See [yq docs](https://mikefarah.gitbook.io/yq/) for query syntax.
 
 ## Examples
 
-### Read the name value from every yaml file.
+### Read the name value from every yaml file
 ```sh
   qyt '.name' '*.yml'
 ```
 
-### Display the top level keys for each file on each branch.
+### Display the top level keys for each file on each branch
 
 ```sh
   qyt '{"b": $branch, "fp": filename, "keys": keys}' '*.yml'
