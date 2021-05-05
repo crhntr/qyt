@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	markdown "github.com/MichaelMure/go-term-markdown"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
@@ -18,7 +19,7 @@ import (
 
 var defaultBranchRegex = regexp.MustCompile(`(main)|(rel/\d+\.\d+)`)
 
-//go:embed README.txt
+//go:embed README.md
 var README string
 
 func main() {
@@ -41,8 +42,7 @@ func main() {
 	flags.BoolVar(&verbose, "v", false, "verbose logging")
 	flags.BoolVar(&noConfirm, "--no-confirm", false, "skip commit confirmation")
 	flags.Usage = func() {
-		fmt.Println(README)
-		fmt.Println("## Options")
+		fmt.Print(string(markdown.Render(README, 80, 0)))
 		flags.PrintDefaults()
 	}
 
