@@ -51,5 +51,3 @@ run "del(.name)" on rel/2.0
 ```
 
 See [text/templates](https://golang.org/pkg/text/template/) for template syntax.
-
-## Options

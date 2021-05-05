@@ -42,7 +42,7 @@ func main() {
 	flags.BoolVar(&verbose, "v", false, "verbose logging")
 	flags.BoolVar(&noConfirm, "--no-confirm", false, "skip commit confirmation")
 	flags.Usage = func() {
-		fmt.Print(string(markdown.Render(README, 80, 0)))
+		fmt.Print(string(markdown.Render(README + "\n## Options", 80, 0)))
 		flags.PrintDefaults()
 	}
 
