@@ -1,11 +1,13 @@
-package qyt
+package main
 
 import (
 	"bytes"
 	"container/list"
+	_ "embed"
 	"fmt"
 	"io"
 	"io/fs"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,15 +21,16 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
+	"github.com/sergi/go-diff/diffmatchpatch"
 	"gopkg.in/yaml.v3"
 )
 
 type CommitMessageData struct {
-	Branch plumbing.ReferenceName
+	Branch string
 	Query  string
 }
 
-func Query(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.Reference, verbose bool, filePattern string) error {
+func Query(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.Reference, verbose, forceCheckout bool, filePattern string) error {
 	wt, err := repo.Worktree()
 	if err != nil {
 		return fmt.Errorf("could not open worktree: %w", err)
@@ -40,7 +43,7 @@ func Query(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 
 		err = wt.Checkout(&git.CheckoutOptions{
 			Branch: branch.Name(),
-			Force:  true,
+			Force:  forceCheckout,
 		})
 		if err != nil {
 			return fmt.Errorf("could not checkout %s: %w", branch.Name().Short(), err)
@@ -67,26 +70,26 @@ func Query(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 
 			var buf bytes.Buffer
 
-			err = applyExpression(&buf, f, exp)
+			err = applyExpression(&buf, f, exp, path, map[string]string{
+				"branch": branch.Name().Short(),
+			})
 			if err != nil {
 				return fmt.Errorf("could not apply yq operation to file %q: %s", path, err)
 			}
-
-			result := strings.TrimSpace(buf.String())
-			if result != "" {
-				fmt.Println(result)
-			}
+			fmt.Print(buf.String())
 
 			return nil
 		})
 		if err != nil {
 			return fmt.Errorf("failed while waliking files on %s: %w", branch.Name().Short(), err)
 		}
+
+		fmt.Println()
 	}
 	return nil
 }
 
-func Apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.Reference, verbose bool, filePattern, msg, expString string) error {
+func Apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.Reference, verbose, forceCheckout bool, filePattern, msg, expString string, confirmCommit func() bool) error {
 	commitTemplate, err := template.New("").Parse(msg)
 	if err != nil {
 		return fmt.Errorf("could not parse commit message template: %w", err)
@@ -94,6 +97,12 @@ func Apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 	conf, err := repo.ConfigScoped(config.SystemScope)
 	if err != nil {
 		return fmt.Errorf("could not get git config: %w", err)
+	}
+	if conf.User.Name == "" {
+		return fmt.Errorf("git user name not set in config")
+	}
+	if conf.User.Email == "" {
+		return fmt.Errorf("git user email not set in config")
 	}
 
 	wt, err := repo.Worktree()
@@ -107,11 +116,13 @@ func Apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 		}
 		err = wt.Checkout(&git.CheckoutOptions{
 			Branch: branch.Name(),
-			Force:  true,
+			Force:  forceCheckout,
 		})
 		if err != nil {
 			return fmt.Errorf("could not checkout %s: %w", branch.Name().Short(), err)
 		}
+
+		dmp := diffmatchpatch.New()
 
 		err = Walk(wt.Filesystem, "", func(path string, info fs.FileInfo, err error) error {
 			if info.IsDir() {
@@ -131,27 +142,41 @@ func Apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 			if err != nil {
 				return fmt.Errorf("could not open file %q: %s", path, err)
 			}
+			defer func() {
+				_ = f.Close()
+			}()
 
-			var buf bytes.Buffer
+			in, err := ioutil.ReadAll(f)
+			if err != nil {
+				return fmt.Errorf("could not read file %q: %s", path, err)
+			}
 
-			err = applyExpression(&buf, f, exp)
+			var out bytes.Buffer
+
+			err = applyExpression(&out, bytes.NewReader(in), exp, path, map[string]string{
+				"branch": branch.Name().Short(),
+			})
 			if err != nil {
 				return fmt.Errorf("could not apply yq operation to file %q: %s", path, err)
 			}
 
-			err = f.Truncate(0)
+			wf, err := wt.Filesystem.Create(path)
 			if err != nil {
-				return fmt.Errorf("could not update file %q: %s", path, err)
+				return fmt.Errorf("could not open file for writing %q: %s", path, err)
 			}
-			_, err = io.Copy(f, &buf)
+			outStr := out.String()
+			_, err = io.Copy(wf, strings.NewReader(outStr))
 			if err != nil {
-				return fmt.Errorf("could not update file %q: %s", path, err)
+				return fmt.Errorf("could not write query result to file %q on branch %s: %s", path, branch.Name().Short(), err)
 			}
 
+			diffs := dmp.DiffMain(outStr, string(in), false)
 			_, err = wt.Add(path)
 			if err != nil {
 				return fmt.Errorf("could not add file %q: %s", path, err)
 			}
+
+			fmt.Printf("diff %s\n\n%s\n", path, dmp.DiffPrettyText(diffs))
 
 			return nil
 		})
@@ -163,6 +188,7 @@ func Apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 		if err != nil {
 			return fmt.Errorf("failed to get git status for %q: %s", branch.Name().Short(), err)
 		}
+		fmt.Printf("On branch %s\nChanges to be committed:\n", branch.Name().Short())
 		fmt.Println(status.String())
 
 		if status.IsClean() {
@@ -171,35 +197,40 @@ func Apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 
 		var buf bytes.Buffer
 		err = commitTemplate.Execute(&buf, CommitMessageData{
-			Branch: branch.Name(),
+			Branch: branch.Name().Short(),
 			Query:  expString,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to generate commit message for branch %s: %w", branch.Name().Short(), err)
 		}
 
-		now := time.Now()
-		_, err = wt.Commit(buf.String(), &git.CommitOptions{
-			Author: &object.Signature{
-				Name:  conf.Author.Name,
-				Email: conf.Author.Email,
-				When:  now,
-			},
-			Committer: &object.Signature{
-				Name:  conf.Author.Name,
-				Email: conf.Author.Email,
-				When:  now,
-			},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to write commit for branch %s: %w", branch.Name().Short(), err)
+		fmt.Printf("Commit message:\n%s\n", buf.String())
+
+		if confirmCommit() {
+			now := time.Now()
+			hash, err := wt.Commit(buf.String(), &git.CommitOptions{
+				Author: &object.Signature{
+					Name:  conf.User.Name,
+					Email: conf.User.Email,
+					When:  now,
+				},
+				Committer: &object.Signature{
+					Name:  conf.User.Name,
+					Email: conf.User.Email,
+					When:  now,
+				},
+			})
+			if err != nil {
+				return fmt.Errorf("failed to write commit for branch %s: %w", branch.Name().Short(), err)
+			}
+			fmt.Printf("Successfully committed %s on branch %s\n", hash.String(), branch.Name().Short())
 		}
 	}
 
 	return nil
 }
 
-func applyExpression(w io.Writer, r io.Reader, exp *yqlib.ExpressionNode) error {
+func applyExpression(w io.Writer, r io.Reader, exp *yqlib.ExpressionNode, filename string, variables map[string]string) error {
 	var bucket yaml.Node
 	decoder := yaml.NewDecoder(r)
 	err := decoder.Decode(&bucket)
@@ -211,13 +242,19 @@ func applyExpression(w io.Writer, r io.Reader, exp *yqlib.ExpressionNode) error 
 
 	nodes := list.New()
 	nodes.PushBack(&yqlib.CandidateNode{
-		Filename:         "in.yml",
+		Filename:         filename,
 		Node:             &bucket,
-		FileIndex:        0,
 		EvaluateTogether: true,
 	})
 
-	result, err := navigator.GetMatchingNodes(yqlib.Context{MatchingNodes: nodes}, exp)
+	ctx := yqlib.Context{
+		MatchingNodes: nodes,
+	}
+	for k, v := range variables {
+		ctx.SetVariable(k, scopeVariable(v))
+	}
+
+	result, err := navigator.GetMatchingNodes(ctx, exp)
 	if err != nil {
 		return fmt.Errorf("yq operation failed: %w", err)
 	}
@@ -230,6 +267,22 @@ func applyExpression(w io.Writer, r io.Reader, exp *yqlib.ExpressionNode) error 
 	}
 
 	return nil
+}
+
+func scopeVariable(value string) *list.List {
+	nodes := list.New()
+
+	var bucket yaml.Node
+	decoder := yaml.NewDecoder(strings.NewReader(fmt.Sprintf("%q", value)))
+	err := decoder.Decode(&bucket)
+	if err != nil {
+		panic(fmt.Sprintf("failed to decode yaml: %s", err))
+	}
+	nodes.PushBack(&yqlib.CandidateNode{
+		Node: &bucket,
+	})
+
+	return nodes
 }
 
 func Walk(fs billy.Filesystem, root string, walkFn filepath.WalkFunc) error {

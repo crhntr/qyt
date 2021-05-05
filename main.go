@@ -1,34 +1,32 @@
 package main
 
 import (
+	"bufio"
+	_ "embed"
 	"flag"
 	"fmt"
-	"github.com/go-git/go-billy/v5"
-	"github.com/go-git/go-billy/v5/memfs"
-	"github.com/go-git/go-billy/v5/osfs"
-	"github.com/go-git/go-git/v5/plumbing"
-	"github.com/go-git/go-git/v5/plumbing/cache"
-	"github.com/go-git/go-git/v5/storage/filesystem"
-	"github.com/mikefarah/yq/v4/pkg/yqlib"
-	"gopkg.in/op/go-logging.v1"
 	"io/ioutil"
 	"os"
-	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/go-git/go-git/v5"
-
-	"github.com/crhntr/qyt"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/mikefarah/yq/v4/pkg/yqlib"
+	"gopkg.in/op/go-logging.v1"
 )
 
 var defaultBranchRegex = regexp.MustCompile(`(main)|(rel/\d+\.\d+)`)
+
+//go:embed README.txt
+var README string
 
 func main() {
 	var (
 		repoPath,
 		branchesPattern,
 		commitMessage string
-		forceCheckout, verbose bool
+		forceCheckout, verbose, noConfirm bool
 	)
 
 	backend := logging.NewLogBackend(ioutil.Discard, "", 0)
@@ -38,11 +36,13 @@ func main() {
 	flags.StringVar(&branchesPattern, "b", defaultBranchRegex.String(), "regular expression for branches")
 	flags.StringVar(&repoPath, "r", ".", "path to local git repository")
 
-	flags.StringVar(&commitMessage, "m", "", "commit message template (qyt.CommitMessageData is passed when executing the template)")
+	flags.StringVar(&commitMessage, "m", "", "commit message template (CommitMessageData is passed when executing the template)")
 	flags.BoolVar(&forceCheckout, "f", false, "force checkout (will throw away local changes)")
 	flags.BoolVar(&verbose, "v", false, "verbose logging")
+	flags.BoolVar(&noConfirm, "--no-confirm", false, "skip commit confirmation")
 	flags.Usage = func() {
-		fmt.Printf("usage: %s [options] <yq_expression> <file pattern>\n", os.Args[0])
+		fmt.Println(README)
+		fmt.Println("## Options")
 		flags.PrintDefaults()
 	}
 
@@ -61,7 +61,7 @@ func main() {
 	yqExpressionString := flags.Arg(0)
 	filePattern := flags.Arg(1)
 
-	repo, err := openRepo(repoPath, memfs.New())
+	repo, err := git.PlainOpen(repoPath)
 	if err != nil {
 		fmt.Println("failed to open repository", err)
 		os.Exit(1)
@@ -80,8 +80,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	input := bufio.NewReader(os.Stdin)
 	if commitMessage != "" {
-		err = qyt.Apply(repo, yqExpression, branches, verbose, filePattern, commitMessage, yqExpressionString)
+		err = Apply(repo, yqExpression, branches, verbose, forceCheckout, filePattern, commitMessage, yqExpressionString, func() bool {
+			if noConfirm {
+				return true
+			}
+			for {
+				fmt.Printf("Commit [Y,n]? ")
+				text, readErr := input.ReadString('\n')
+				if readErr != nil {
+					continue
+				}
+				return strings.TrimSpace(text) == "Y"
+			}
+		})
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
@@ -89,28 +102,11 @@ func main() {
 		return
 	}
 
-	err = qyt.Query(repo, yqExpression, branches, verbose, filePattern)
+	err = Query(repo, yqExpression, branches, verbose, forceCheckout, filePattern)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-}
-
-func openRepo(repoPath string, fs billy.Filesystem) (*git.Repository, error) {
-	absRepoPath, err := filepath.Abs(repoPath)
-	if err != nil {
-		return nil, err
-	}
-	dotGitInfo, err := os.Stat(filepath.Join(absRepoPath, git.GitDirName))
-	if err != nil {
-		return nil, err
-	}
-	if !dotGitInfo.IsDir() {
-		return nil, err
-	}
-	dotGit := osfs.New(filepath.Join(repoPath, git.GitDirName))
-	c := filesystem.NewStorage(dotGit, cache.NewObjectLRU(cache.DefaultMaxSize))
-	return git.Open(c, fs)
 }
 
 func branchesMatchingRegex(branchPattern string, repo *git.Repository, verbose bool) ([]plumbing.Reference, error) {
