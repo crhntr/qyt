@@ -170,7 +170,7 @@ func Apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 				return fmt.Errorf("could not write query result to file %q on branch %s: %s", path, branch.Name().Short(), err)
 			}
 
-			diffs := dmp.DiffMain(outStr, string(in), false)
+			diffs := dmp.DiffMain(string(in), outStr, false)
 			_, err = wt.Add(path)
 			if err != nil {
 				return fmt.Errorf("could not add file %q: %s", path, err)
