@@ -40,9 +40,9 @@ func main() {
 	flags.StringVar(&commitMessage, "m", "", "commit message template (CommitMessageData is passed when executing the template)")
 	flags.BoolVar(&forceCheckout, "f", false, "force checkout (will throw away local changes)")
 	flags.BoolVar(&verbose, "v", false, "verbose logging")
-	flags.BoolVar(&noConfirm, "--no-confirm", false, "skip commit confirmation")
+	flags.BoolVar(&noConfirm, "no-confirm", false, "skip commit confirmation")
 	flags.Usage = func() {
-		fmt.Print(string(markdown.Render(README + "\n## Options", 80, 0)))
+		fmt.Print(string(markdown.Render(README+"\n## Options", 80, 0)))
 		flags.PrintDefaults()
 	}
 
