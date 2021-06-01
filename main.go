@@ -115,7 +115,7 @@ func main() {
 		return
 	}
 
-	err = Query(repo, yqExpression, branches, verbose, forceCheckout, filePattern)
+	err = Query(repo, yqExpression, branches, verbose, filePattern)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -156,7 +156,7 @@ type CommitMessageData struct {
 	Query  string
 }
 
-func Query(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.Reference, verbose, forceCheckout bool, filePattern string) error {
+func Query(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.Reference, verbose bool, filePattern string) error {
 	for _, branch := range branches {
 		if verbose {
 			fmt.Printf("# \tchecking out %q\n", branch.Name().Short())
