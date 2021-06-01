@@ -18,7 +18,7 @@ See [yq docs](https://mikefarah.gitbook.io/yq/) for query syntax.
 ### Display the top level keys for each file on each branch
 
 ```sh
-  qyt '{"b": $branch, "fp": filename, "keys": keys}' '*.yml'
+  qyt '{"b": $branch, "fp": $filename, "keys": keys}' '*.yml'
 ```
 
 ## Committing Query Results
