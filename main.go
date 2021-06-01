@@ -159,7 +159,7 @@ type CommitMessageData struct {
 func Query(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.Reference, verbose bool, filePattern string) error {
 	for _, branch := range branches {
 		if verbose {
-			fmt.Printf("# \tchecking out %q\n", branch.Name().Short())
+			fmt.Printf("# \tquerying files on %q\n", branch.Name().Short())
 		}
 
 		obj, objectErr := repo.Object(plumbing.AnyObject, branch.Hash())
@@ -168,6 +168,10 @@ func Query(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 		}
 
 		resolveMatchesErr := resolveMatches(obj, filePattern, func(file *object.File) error {
+			if verbose {
+				fmt.Printf("# \t\tmatched %q\n", file.Name)
+			}
+
 			var buf bytes.Buffer
 
 			rc, readerErr := file.Reader()
@@ -191,8 +195,6 @@ func Query(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 		if resolveMatchesErr != nil {
 			return resolveMatchesErr
 		}
-
-		fmt.Println()
 	}
 	return nil
 }
