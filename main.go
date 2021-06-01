@@ -157,57 +157,38 @@ type CommitMessageData struct {
 }
 
 func Query(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.Reference, verbose, forceCheckout bool, filePattern string) error {
-	wt, err := repo.Worktree()
-	if err != nil {
-		return fmt.Errorf("could not open worktree: %w", err)
-	}
-
 	for _, branch := range branches {
 		if verbose {
 			fmt.Printf("# \tchecking out %q\n", branch.Name().Short())
 		}
 
-		err = wt.Checkout(&git.CheckoutOptions{
-			Branch: branch.Name(),
-			Force:  forceCheckout,
-		})
-		if err != nil {
-			return fmt.Errorf("could not checkout %s: %w", branch.Name().Short(), err)
+		obj, objectErr := repo.Object(plumbing.AnyObject, branch.Hash())
+		if objectErr != nil {
+			return objectErr
 		}
 
-		err = Walk(wt.Filesystem, "", func(path string, info fs.FileInfo, err error) error {
-			if info.IsDir() {
-				return nil
-			}
-			if matched, err := filepath.Match(filePattern, path); err != nil {
-				return err
-			} else if !matched {
-				return nil
-			}
-
-			f, err := wt.Filesystem.Open(path)
-			if err != nil {
-				return fmt.Errorf("could not open file %q: %s", path, err)
-			}
-
-			if verbose {
-				fmt.Printf("# \t\tapplying yq operation to file %q\n", path)
-			}
-
+		resolveMatchesErr := resolveMatches(obj, filePattern, func(file *object.File) error {
 			var buf bytes.Buffer
 
-			err = applyExpression(&buf, f, exp, path, map[string]string{
+			rc, readerErr := file.Reader()
+			if readerErr != nil {
+				return readerErr
+			}
+
+			applyExpressionErr := applyExpression(&buf, rc, exp, file.Name, map[string]string{
 				"branch": branch.Name().Short(),
 			})
-			if err != nil {
-				return fmt.Errorf("could not apply yq operation to file %q: %s", path, err)
+			if applyExpressionErr != nil {
+				return fmt.Errorf("could not apply yq operation to file %q on %s: %s", file.Name, branch.Name(), applyExpressionErr)
 			}
+
 			fmt.Print(buf.String())
 
 			return nil
 		})
-		if err != nil {
-			return fmt.Errorf("failed while waliking files on %s: %w", branch.Name().Short(), err)
+
+		if resolveMatchesErr != nil {
+			return resolveMatchesErr
 		}
 
 		fmt.Println()
@@ -473,4 +454,35 @@ func readDirNames(fs billy.Filesystem, dirname string) ([]string, error) {
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+func resolveMatches(obj object.Object, pattern string, fn func(file *object.File) error) error {
+	switch o := obj.(type) {
+	case *object.Commit:
+		t, err := o.Tree()
+		if err != nil {
+			return err
+		}
+		return resolveMatches(t, pattern, fn)
+	case *object.Tag:
+		target, err := o.Object()
+		if err != nil {
+			return err
+		}
+		return resolveMatches(target, pattern, fn)
+	case *object.Tree:
+		return o.Files().ForEach(func(file *object.File) error {
+			matched, err := filepath.Match(pattern, file.Name)
+			if err != nil {
+				return err
+			}
+			if !matched {
+				return nil
+			}
+			return fn(file)
+		})
+	//case *object.Blob:
+	default:
+		return object.ErrUnsupportedObject
+	}
 }
