@@ -185,6 +185,7 @@ func query(out io.Writer, repo *git.Repository, exp *yqlib.ExpressionNode, branc
 			applyExpressionErr := applyExpression(&buf, rc, exp, file.Name, map[string]string{
 				"branch":   branch.Name().Short(),
 				"filename": file.Name,
+				"head":     branch.Hash().String(),
 			}, outputToJSON)
 			if applyExpressionErr != nil {
 				return fmt.Errorf("could not apply yq operation to file %q on %s: %s", file.Name, branch.Name(), applyExpressionErr)
@@ -346,6 +347,7 @@ func applyOnBranch(
 		applyExpressionErr := applyExpression(&out, bytes.NewReader(in), exp, file.Name, map[string]string{
 			"branch":   branch.Name().Short(),
 			"filename": file.Name,
+			"head":     branch.Hash().String(),
 		}, false)
 
 		if applyExpressionErr != nil {
