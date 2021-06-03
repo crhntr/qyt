@@ -49,7 +49,7 @@ func TestApply_one_branch_create_feature_branch(t *testing.T) {
 		return
 	}
 
-	_, commitErr := wt.Commit("add last_char", &git.CommitOptions{Author: signature, Committer: signature, All: true})
+	_, commitErr := wt.Commit("add last_char", &git.CommitOptions{Author: &signature, Committer: &signature, All: true})
 	if !assert.NoError(t, commitErr) {
 		return
 	}
@@ -59,6 +59,7 @@ func TestApply_one_branch_create_feature_branch(t *testing.T) {
 			`.version = "2.0"`,
 			"main",
 			"*/main.yml", "add version\n\nQuery: {{.Query}}\n", "version-",
+			signature,
 			testing.Verbose(), false,
 		),
 	) {
@@ -167,7 +168,7 @@ func TestApply_update_existing_branches(t *testing.T) {
 		return
 	}
 
-	_, commitErr := wt.Commit("add last_char", &git.CommitOptions{Author: signature, Committer: signature, All: true})
+	_, commitErr := wt.Commit("add last_char", &git.CommitOptions{Author: &signature, Committer: &signature, All: true})
 	if !assert.NoError(t, commitErr) {
 		return
 	}
@@ -187,6 +188,7 @@ func TestApply_update_existing_branches(t *testing.T) {
 				fmt.Sprintf(`.version = %q`, v),
 				strings.ReplaceAll(b, ".", "\\."),
 				"*/main.yml", "set version\n\nQuery: {{.Query}}\n", "",
+				signature,
 				testing.Verbose(), true,
 			),
 		) {
@@ -199,6 +201,7 @@ func TestApply_update_existing_branches(t *testing.T) {
 			`.greeting = "¡Holla!"`,
 			defaultBranchRegex.String(),
 			"*/main.yml", "set greeting\n\nQuery: {{.Query}}\n", "",
+			signature,
 			testing.Verbose(), true,
 		),
 	) {
@@ -315,7 +318,7 @@ func createFile(t *testing.T, fs billy.Basic, path, contents string) {
 func createInitialCommitOnMain(t *testing.T, wt *git.Worktree) {
 	t.Helper()
 
-	sig := someSignature()
+	signature := someSignature()
 
 	keepFile, createFileErr := wt.Filesystem.Create(".git-keep")
 	if !assert.NoError(t, createFileErr) {
@@ -331,7 +334,7 @@ func createInitialCommitOnMain(t *testing.T, wt *git.Worktree) {
 		return
 	}
 
-	_, commitErr := wt.Commit("initial commit", &git.CommitOptions{Author: sig, Committer: sig})
+	_, commitErr := wt.Commit("initial commit", &git.CommitOptions{Author: &signature, Committer: &signature})
 	if !assert.NoError(t, commitErr) {
 		return
 	}
@@ -346,8 +349,8 @@ func createInitialCommitOnMain(t *testing.T, wt *git.Worktree) {
 	}
 }
 
-func someSignature() *object.Signature {
-	return &object.Signature{
+func someSignature() object.Signature {
+	return object.Signature{
 		Name:  "christopher",
 		Email: "christopher@exmaple.com",
 		When:  time.Unix(1622680178, 0),

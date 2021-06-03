@@ -89,7 +89,13 @@ func main() {
 	}
 
 	if commitMessage != "" {
-		err = Apply(repo, yqExpressionString, branchesPattern, filePattern, commitMessage, branchPrefix, verbose, allowOverridingExistingBranches)
+		author, getSignatureErr := getSignature(repo, time.Now())
+		if getSignatureErr != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "failed to open repository", getSignatureErr)
+			os.Exit(1)
+		}
+
+		err = Apply(repo, yqExpressionString, branchesPattern, filePattern, commitMessage, branchPrefix, author, verbose, allowOverridingExistingBranches)
 		if err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "apply error: %s\n", err.Error())
 			os.Exit(1)
@@ -196,7 +202,7 @@ func query(out io.Writer, repo *git.Repository, exp *yqlib.ExpressionNode, branc
 	return nil
 }
 
-func Apply(repo *git.Repository, yqExp, branchRegex, filePattern, msg, branchPrefix string, verbose, allowOverridingExistingBranches bool) error {
+func Apply(repo *git.Repository, yqExp, branchRegex, filePattern, msg, branchPrefix string, author object.Signature, verbose, allowOverridingExistingBranches bool) error {
 	parser := yqlib.NewExpressionParser()
 	yqExpression, err := parser.ParseExpression(yqExp)
 	if err != nil {
@@ -208,18 +214,13 @@ func Apply(repo *git.Repository, yqExp, branchRegex, filePattern, msg, branchPre
 		return fmt.Errorf("failed to match branches: %s\n", err)
 	}
 
-	return apply(repo, yqExpression, branches, verbose, allowOverridingExistingBranches, filePattern, msg, branchPrefix, yqExp)
+	return apply(repo, yqExpression, branches, author, verbose, allowOverridingExistingBranches, filePattern, msg, branchPrefix, yqExp)
 }
 
-func apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.Reference, verbose, allowOverridingExistingBranches bool, filePattern, msg, branchPrefix, expString string) error {
+func apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.Reference, author object.Signature, verbose, allowOverridingExistingBranches bool, filePattern, msg, branchPrefix, expString string) error {
 	commitTemplate, templateParseErr := template.New("").Parse(msg)
 	if templateParseErr != nil {
 		return fmt.Errorf("could not parse commit message template: %w", templateParseErr)
-	}
-
-	author, getSignatureErr := getSignature(repo, time.Now())
-	if getSignatureErr != nil {
-		return getSignatureErr
 	}
 
 	var (

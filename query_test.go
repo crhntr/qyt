@@ -76,7 +76,7 @@ func createSomeFilesWithNameKey(t *testing.T, repo *git.Repository, branch strin
 		_, addErr := wt.Add(p)
 		assert.NoError(t, addErr)
 
-		_, commitErr := wt.Commit(fmt.Sprintf("add %s", name), &git.CommitOptions{Author: sig, Committer: sig})
+		_, commitErr := wt.Commit(fmt.Sprintf("add %s", name), &git.CommitOptions{Author: &sig, Committer: &sig})
 		assert.NoError(t, commitErr)
 	}
 }
