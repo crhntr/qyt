@@ -28,7 +28,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var defaultBranchRegex = regexp.MustCompile(`(main)|(rel/\d+\.\d+)`)
+var defaultBranchRegex = regexp.MustCompile(`^((main)|(rel/\d+\.\d+))$`)
 
 //go:embed README.md
 var README string
