@@ -263,7 +263,9 @@ func apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 	}
 
 	for name, hash := range newBranches {
-		fmt.Println("updating branch", name)
+		if verbose {
+			fmt.Println("updating branch", name)
+		}
 
 		if !allowOverridingExistingBranches {
 			_, err := repo.Storer.Reference(name)
