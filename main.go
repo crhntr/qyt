@@ -232,139 +232,25 @@ func apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 
 	for _, branch := range branches {
 		newBranchName := plumbing.NewBranchReferenceName(branchPrefix + branch.Name().Short())
-		if !allowOverridingExistingBranches {
-			_, err := repo.Storer.Reference(newBranchName)
-			if err == nil {
-				return fmt.Errorf("a branch named %q already exists", newBranchName.Short())
-			}
+
+		commitObj, blobObjects, treeObjects, applyOnBranchErr := applyOnBranch(
+			repo, branch, newBranchName,
+			exp, commitTemplate, author,
+			expString, filePattern,
+			allowOverridingExistingBranches, verbose)
+
+		if applyOnBranchErr != nil {
+			return applyOnBranchErr
 		}
 
-		if verbose {
-			fmt.Printf("# \tquerying files on %q\n", branch.Name().Short())
-		}
-
-		obj, objectErr := repo.Object(plumbing.AnyObject, branch.Hash())
-		if objectErr != nil {
-			return objectErr
-		}
-
-		parentCommit, ok := obj.(*object.Commit)
-		if !ok {
-			return fmt.Errorf("%s does not point to a commit object: got type %T", branch.Name().Short(), obj)
-		}
-
-		updateCount := 0
-
-		var updatedFiles []memoryFile
-
-		resolveMatchesErr := resolveMatchingFiles(obj, filePattern, func(file *object.File) error {
-			if verbose {
-				fmt.Printf("# \t\tmatched %q\n", file.Name)
-			}
-
-			rc, readerErr := file.Reader()
-			if readerErr != nil {
-				return readerErr
-			}
-			in, readErr := ioutil.ReadAll(rc)
-			if readErr != nil {
-				return fmt.Errorf("could not read file %q: %s", file.Name, readErr)
-			}
-
-			var out bytes.Buffer
-
-			applyExpressionErr := applyExpression(&out, bytes.NewReader(in), exp, file.Name, map[string]string{
-				"branch":   branch.Name().Short(),
-				"filename": file.Name,
-			}, false)
-
-			if applyExpressionErr != nil {
-				return applyExpressionErr
-			}
-
-			if bytes.Equal(out.Bytes(), in) {
-				if verbose {
-					fmt.Printf("# \t\t\tno change\n")
-				}
-				return nil
-			}
-
-			fileObj, saveObjErr := memoryBlobObject(out.Bytes())
-			if saveObjErr != nil {
-				return saveObjErr
-			}
-
-			updatedFiles = append(updatedFiles, memoryFile{
-				Name:   filepath.ToSlash(file.Name),
-				Mode:   file.Mode,
-				Object: fileObj,
-			})
-			newBlobObjects = append(newBlobObjects, fileObj)
-
-			updateCount++
-
-			return nil
-		})
-		if resolveMatchesErr != nil {
-			return resolveMatchesErr
-		}
-
-		if updateCount == 0 {
+		if commitObj.Hash().IsZero() {
 			continue
 		}
 
-		parentTree, treeErr := parentCommit.Tree()
-		if treeErr != nil {
-			return treeErr
-		}
-
-		tree, updatedSubTrees, createTreeErr := createNewTreeWithFiles(parentTree, updatedFiles)
-		if createTreeErr != nil {
-			return createTreeErr
-		}
-
-		for _, subTreeObj := range updatedSubTrees {
-			var subTree plumbing.MemoryObject
-			treeEncodeErr := subTreeObj.Encode(&subTree)
-			if treeEncodeErr != nil {
-				return treeEncodeErr
-			}
-			newTreeObjects = append(newTreeObjects, subTree)
-		}
-
-		var treeObj plumbing.MemoryObject
-		treeEncodeErr := tree.Encode(&treeObj)
-		if treeEncodeErr != nil {
-			return treeEncodeErr
-		}
-
-		var messageBuf bytes.Buffer
-		templateExecErr := commitTemplate.Execute(&messageBuf, CommitMessageData{
-			Branch: branch.Name().Short(),
-			Query:  expString,
-		})
-		if templateExecErr != nil {
-			return templateExecErr
-		}
-
-		commit := object.Commit{
-			Author:       author,
-			Committer:    author,
-			Message:      messageBuf.String(),
-			TreeHash:     treeObj.Hash(),
-			ParentHashes: []plumbing.Hash{parentCommit.Hash},
-		}
-
-		var commitObj plumbing.MemoryObject
-
-		commitEncodeErr := commit.Encode(&commitObj)
-		if commitEncodeErr != nil {
-			return commitEncodeErr
-		}
-
 		newCommitObjects = append(newCommitObjects, commitObj)
-		newTreeObjects = append(newTreeObjects, treeObj)
 		newBranches[newBranchName] = commitObj.Hash()
+		newBlobObjects = append(newBlobObjects, blobObjects...)
+		newTreeObjects = append(newTreeObjects, treeObjects...)
 	}
 
 	for _, objList := range [][]plumbing.MemoryObject{newBlobObjects, newTreeObjects, newCommitObjects} {
@@ -395,6 +281,157 @@ func apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 	}
 
 	return nil
+}
+
+func applyOnBranch(
+	repo *git.Repository, branch plumbing.Reference, newBranchName plumbing.ReferenceName,
+	exp *yqlib.ExpressionNode,
+	commitTemplate *template.Template,
+	author object.Signature,
+	expString, filePattern string,
+	allowOverridingExistingBranches, verbose bool,
+) (
+	plumbing.MemoryObject, []plumbing.MemoryObject, []plumbing.MemoryObject, error,
+) {
+	if !allowOverridingExistingBranches {
+		_, err := repo.Storer.Reference(newBranchName)
+		if err == nil {
+			return plumbing.MemoryObject{}, nil, nil,
+				fmt.Errorf("a branch named %q already exists", newBranchName.Short())
+		}
+	}
+
+	if verbose {
+		fmt.Printf("# \tquerying files on %q\n", branch.Name().Short())
+	}
+
+	obj, objectErr := repo.Object(plumbing.AnyObject, branch.Hash())
+	if objectErr != nil {
+		return plumbing.MemoryObject{}, nil, nil, objectErr
+	}
+
+	parentCommit, ok := obj.(*object.Commit)
+	if !ok {
+		return plumbing.MemoryObject{}, nil, nil,
+			fmt.Errorf("%s does not point to a commit object: got type %T", branch.Name().Short(), obj)
+	}
+
+	updateCount := 0
+
+	var (
+		updatedFiles []memoryFile
+		newBlobObjects,
+		newTreeObjects []plumbing.MemoryObject
+	)
+
+	resolveMatchesErr := resolveMatchingFiles(obj, filePattern, func(file *object.File) error {
+		if verbose {
+			fmt.Printf("# \t\tmatched %q\n", file.Name)
+		}
+
+		rc, readerErr := file.Reader()
+		if readerErr != nil {
+			return readerErr
+		}
+		in, readErr := ioutil.ReadAll(rc)
+		if readErr != nil {
+			return fmt.Errorf("could not read file %q: %s", file.Name, readErr)
+		}
+
+		var out bytes.Buffer
+
+		applyExpressionErr := applyExpression(&out, bytes.NewReader(in), exp, file.Name, map[string]string{
+			"branch":   branch.Name().Short(),
+			"filename": file.Name,
+		}, false)
+
+		if applyExpressionErr != nil {
+			return applyExpressionErr
+		}
+
+		if bytes.Equal(out.Bytes(), in) {
+			if verbose {
+				fmt.Printf("# \t\t\tno change\n")
+			}
+			return nil
+		}
+
+		fileObj, saveObjErr := memoryBlobObject(out.Bytes())
+		if saveObjErr != nil {
+			return saveObjErr
+		}
+
+		updatedFiles = append(updatedFiles, memoryFile{
+			Name:   filepath.ToSlash(file.Name),
+			Mode:   file.Mode,
+			Object: fileObj,
+		})
+		newBlobObjects = append(newBlobObjects, fileObj)
+
+		updateCount++
+
+		return nil
+	})
+	if resolveMatchesErr != nil {
+		return plumbing.MemoryObject{}, nil, nil, resolveMatchesErr
+	}
+
+	if updateCount == 0 {
+		return plumbing.MemoryObject{}, nil, nil, nil
+	}
+
+	parentTree, treeErr := parentCommit.Tree()
+	if treeErr != nil {
+		return plumbing.MemoryObject{}, nil, nil, treeErr
+	}
+
+	tree, updatedSubTrees, createTreeErr := createNewTreeWithFiles(parentTree, updatedFiles)
+	if createTreeErr != nil {
+		return plumbing.MemoryObject{}, nil, nil, createTreeErr
+	}
+
+	for _, subTreeObj := range updatedSubTrees {
+		var subTree plumbing.MemoryObject
+		treeEncodeErr := subTreeObj.Encode(&subTree)
+		if treeEncodeErr != nil {
+			return plumbing.MemoryObject{}, nil, nil, treeEncodeErr
+		}
+		newTreeObjects = append(newTreeObjects, subTree)
+	}
+
+	var treeObj plumbing.MemoryObject
+	treeEncodeErr := tree.Encode(&treeObj)
+	if treeEncodeErr != nil {
+		return plumbing.MemoryObject{}, nil, nil, treeEncodeErr
+	}
+
+	var messageBuf bytes.Buffer
+	templateExecErr := commitTemplate.Execute(&messageBuf, CommitMessageData{
+		Branch: branch.Name().Short(),
+		Query:  expString,
+	})
+	if templateExecErr != nil {
+		return plumbing.MemoryObject{}, nil, nil, templateExecErr
+	}
+
+	commit := object.Commit{
+		Author:       author,
+		Committer:    author,
+		Message:      messageBuf.String(),
+		TreeHash:     treeObj.Hash(),
+		ParentHashes: []plumbing.Hash{parentCommit.Hash},
+	}
+
+	var commitObj plumbing.MemoryObject
+
+	commitEncodeErr := commit.Encode(&commitObj)
+	if commitEncodeErr != nil {
+		return plumbing.MemoryObject{}, nil, nil, commitEncodeErr
+	}
+
+	newTreeObjects = append(newTreeObjects, treeObj)
+
+	return commitObj, newBlobObjects, newTreeObjects, nil
 }
 
 type memoryFile struct {
