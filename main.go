@@ -175,6 +175,10 @@ func query(out io.Writer, repo *git.Repository, exp *yqlib.ExpressionNode, branc
 				_, _ = fmt.Fprintf(out, "# \t\tmatched %q\n", file.Name)
 			}
 
+			if !outputToJSON {
+				_, _ = out.Write([]byte("---\n"))
+			}
+
 			rc, readerErr := file.Reader()
 			if readerErr != nil {
 				return readerErr
