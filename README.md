@@ -1,7 +1,5 @@
 # QYT lets you run yq across git branches!
 
-*Warning this is still in early dev. It might mess up your local git state.*
-
 ```
   qyt [options] <yq_expression> <file pattern>
 ```
