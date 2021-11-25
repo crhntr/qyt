@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"path"
 	"path/filepath"
 	"strings"
@@ -85,7 +85,7 @@ func TestApply_one_branch_create_feature_branch(t *testing.T) {
 		if !assert.NoError(t, rdErr) {
 			return
 		}
-		commitMessage, readCommitMessageErr := ioutil.ReadAll(rd)
+		commitMessage, readCommitMessageErr := io.ReadAll(rd)
 		if !assert.NoError(t, readCommitMessageErr) {
 			return
 		}
@@ -234,7 +234,7 @@ func TestApply_update_existing_branches(t *testing.T) {
 				if !assert.NoError(t, rdErr) {
 					return
 				}
-				commitMessage, readCommitMessageErr := ioutil.ReadAll(rd)
+				commitMessage, readCommitMessageErr := io.ReadAll(rd)
 				if !assert.NoError(t, readCommitMessageErr) {
 					return
 				}
