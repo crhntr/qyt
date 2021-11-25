@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,7 +33,7 @@ var defaultBranchRegex = regexp.MustCompile(`^((main)|(rel/\d+\.\d+))$`)
 var README string
 
 func init() {
-	backend := logging.NewLogBackend(ioutil.Discard, "", 0)
+	backend := logging.NewLogBackend(io.Discard, "", 0)
 	logging.SetBackend(backend)
 }
 
@@ -337,7 +336,7 @@ func applyOnBranch(
 		if readerErr != nil {
 			return readerErr
 		}
-		in, readErr := ioutil.ReadAll(rc)
+		in, readErr := io.ReadAll(rc)
 		if readErr != nil {
 			return fmt.Errorf("could not read file %q: %s", file.Name, readErr)
 		}

@@ -14,6 +14,5 @@ require (
 	golang.org/x/crypto v0.0.0-20210503195802-e9a32991a82e // indirect
 	golang.org/x/net v0.0.0-20210504132125-bbd867fde50d // indirect
 	golang.org/x/sys v0.0.0-20210503173754-0981d6026fa6 // indirect
-	gopkg.in/op/go-logging.v1 v1.0.0-20160211212156-b2cb9fa56473
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
 )
