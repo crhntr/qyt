@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"io/ioutil"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/go-git/go-git/v5/plumbing/filemode"
@@ -110,5 +113,34 @@ func TestCreateNewTreeWithFiles(t *testing.T) {
 		for _, f := range filtered {
 			assert.Equal(t, filepath.Base(f.Name), "file.txt")
 		}
+	})
+}
+
+func TestTrueIfYEntered(t *testing.T) {
+	t.Run("Y", func(t *testing.T) {
+		r := strings.NewReader("Y\n")
+		var w bytes.Buffer
+		res := trueIfYEntered(&w, r, "input something")
+		assert.True(t, res)
+		buf, _ := ioutil.ReadAll(&w)
+		assert.Equal(t, string(buf), "input something Y/n: ")
+	})
+
+	t.Run("not valid y", func(t *testing.T) {
+		r := strings.NewReader("foo\nY\n")
+		var w bytes.Buffer
+		res := trueIfYEntered(&w, r, "input something")
+		assert.True(t, res)
+		buf, _ := ioutil.ReadAll(&w)
+		assert.Equal(t, string(buf), "input something Y/n: input something Y/n: ")
+	})
+
+	t.Run("not valid y", func(t *testing.T) {
+		r := strings.NewReader("n\n")
+		var w bytes.Buffer
+		res := trueIfYEntered(&w, r, "input something")
+		assert.False(t, res)
+		buf, _ := ioutil.ReadAll(&w)
+		assert.Equal(t, string(buf), "input something Y/n: ")
 	})
 }

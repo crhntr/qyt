@@ -60,7 +60,7 @@ func TestApply_one_branch_create_feature_branch(t *testing.T) {
 			"main",
 			"*/main.yml", "add version\n\nQuery: {{.Query}}\n", "version-",
 			signature,
-			testing.Verbose(), false,
+			testing.Verbose(), false, func() bool {return true},
 		),
 	) {
 		return
@@ -189,7 +189,7 @@ func TestApply_update_existing_branches(t *testing.T) {
 				strings.ReplaceAll(b, ".", "\\."),
 				"*/main.yml", "set version\n\nQuery: {{.Query}}\n", "",
 				signature,
-				testing.Verbose(), true,
+				testing.Verbose(), true, func() bool {return true},
 			),
 		) {
 			return
@@ -202,7 +202,7 @@ func TestApply_update_existing_branches(t *testing.T) {
 			defaultBranchRegex.String(),
 			"*/main.yml", "set greeting\n\nQuery: {{.Query}}\n", "",
 			signature,
-			testing.Verbose(), true,
+			testing.Verbose(), true, func() bool {return true},
 		),
 	) {
 		return
@@ -296,6 +296,89 @@ func TestApply_update_existing_branches(t *testing.T) {
 	assert.NoError(t, branchIterForEachErr)
 }
 
+func TestApply_skip_commit_when_check_commit_returns_false(t *testing.T) {
+	fs := memfs.New()
+	store := memory.NewStorage()
+	repo, initErr := git.Init(store, fs)
+	if !assert.NoError(t, initErr) {
+		return
+	}
+
+	signature := someSignature()
+
+	wt, wtErr := repo.Worktree()
+	if !assert.NoError(t, wtErr) {
+		return
+	}
+
+	createInitialCommitOnMain(t, wt)
+	if !assert.NoError(t, repo.Storer.RemoveReference(plumbing.Master)) {
+		return
+	}
+
+	for _, dir := range []string{"foo", "bar", "baz"} {
+		if !assert.NoError(t, wt.Filesystem.MkdirAll(dir, 0777)) {
+			return
+		}
+		createFile(t, wt.Filesystem, dir+"/main.yml", fmt.Sprintf("---\nlast_char: %c\n", dir[len(dir)-1]))
+	}
+	if !assert.NoError(t, wt.AddGlob("*/main.yml")) {
+		return
+	}
+
+	latestCommitBeforeApply, commitErr := wt.Commit("add last_char", &git.CommitOptions{Author: &signature, Committer: &signature, All: true})
+	if !assert.NoError(t, commitErr) {
+		return
+	}
+
+	for _, v := range []string{"2.5", "2.6", "2.7"} {
+		b := "rel/" + v
+		checkoutErr := wt.Checkout(&git.CheckoutOptions{
+			Branch: plumbing.NewBranchReferenceName(b),
+			Create: true,
+		})
+		if !assert.NoError(t, checkoutErr) {
+			return
+		}
+
+		if !assert.NoError(t,
+			Apply(repo,
+				fmt.Sprintf(`.version = %q`, v),
+				strings.ReplaceAll(b, ".", "\\."),
+				"*/main.yml", "set version\n\nQuery: {{.Query}}\n", "",
+				signature,
+				testing.Verbose(), true, func() bool {return false},
+			),
+		) {
+			return
+		}
+	}
+
+	branchIter, branchIterErr := repo.Branches()
+	if !assert.NoError(t, branchIterErr) {
+		return
+	}
+
+	branchIterForEachErr := branchIter.ForEach(func(reference *plumbing.Reference) error {
+		t.Run(fmt.Sprintf("expect branch %s to point to initial commit", reference.Name().Short()), func(t *testing.T) {
+			t.Run("check commit message", func(t *testing.T) {
+				ref, getVersionMainBranchErr := repo.Storer.Reference(reference.Name())
+				if !assert.NoError(t, getVersionMainBranchErr) {
+					return
+				}
+
+				if !assert.Equal(t, latestCommitBeforeApply.String(), ref.Hash().String()) {
+					return
+				}
+			})
+		})
+
+		return nil
+	})
+
+	assert.NoError(t, branchIterForEachErr)
+}
+
 func createFile(t *testing.T, fs billy.Basic, path, contents string) {
 	t.Helper()
 
@@ -315,28 +398,28 @@ func createFile(t *testing.T, fs billy.Basic, path, contents string) {
 	}
 }
 
-func createInitialCommitOnMain(t *testing.T, wt *git.Worktree) {
+func createInitialCommitOnMain(t *testing.T, wt *git.Worktree) plumbing.Hash {
 	t.Helper()
 
 	signature := someSignature()
 
 	keepFile, createFileErr := wt.Filesystem.Create(".git-keep")
 	if !assert.NoError(t, createFileErr) {
-		return
+		return plumbing.Hash{}
 	}
 
 	if !assert.NoError(t, keepFile.Close()) {
-		return
+		return plumbing.Hash{}
 	}
 
 	_, addErr := wt.Add(".git-keep")
 	if !assert.NoError(t, addErr) {
-		return
+		return plumbing.Hash{}
 	}
 
-	_, commitErr := wt.Commit("initial commit", &git.CommitOptions{Author: &signature, Committer: &signature})
+	commitHash, commitErr := wt.Commit("initial commit", &git.CommitOptions{Author: &signature, Committer: &signature})
 	if !assert.NoError(t, commitErr) {
-		return
+		return plumbing.Hash{}
 	}
 
 	checkoutErr := wt.Checkout(&git.CheckoutOptions{
@@ -345,8 +428,10 @@ func createInitialCommitOnMain(t *testing.T, wt *git.Worktree) {
 	})
 
 	if !assert.NoError(t, checkoutErr) {
-		return
+		return plumbing.Hash{}
 	}
+
+	return commitHash
 }
 
 func someSignature() object.Signature {

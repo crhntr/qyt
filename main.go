@@ -44,7 +44,7 @@ func main() {
 		branchesPattern,
 		branchPrefix,
 		commitMessage string
-		allowOverridingExistingBranches, verbose, outputToJSON bool
+		allowOverridingExistingBranches, verbose, outputToJSON, noConfirm bool
 		// noConfirm bool
 	)
 
@@ -59,7 +59,7 @@ func main() {
 	flags.BoolVar(&verbose, "v", false, "verbose logging")
 
 	flags.BoolVar(&outputToJSON, "json", false, "format output as json")
-	// flags.BoolVar(&noConfirm, "no-confirm", false, "skip commit confirmation")
+	flags.BoolVar(&noConfirm, "no-confirm", false, "skip commit confirmation")
 
 	flags.Usage = func() {
 		fmt.Print(string(markdown.Render(README+"\n## Options", 80, 0)))
@@ -95,7 +95,13 @@ func main() {
 			os.Exit(1)
 		}
 
-		err = Apply(repo, yqExpressionString, branchesPattern, filePattern, commitMessage, branchPrefix, author, verbose, allowOverridingExistingBranches)
+		err = Apply(
+			repo, yqExpressionString, branchesPattern, filePattern,
+			commitMessage, branchPrefix, author, verbose, allowOverridingExistingBranches,
+			func() bool {
+				return noConfirm || trueIfYEntered(os.Stdout, os.Stdin, "commit change to branch")
+			},
+		)
 		if err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "apply error: %s\n", err.Error())
 			os.Exit(1)
@@ -207,7 +213,7 @@ func query(out io.Writer, repo *git.Repository, exp *yqlib.ExpressionNode, branc
 	return nil
 }
 
-func Apply(repo *git.Repository, yqExp, branchRegex, filePattern, msg, branchPrefix string, author object.Signature, verbose, allowOverridingExistingBranches bool) error {
+func Apply(repo *git.Repository, yqExp, branchRegex, filePattern, msg, branchPrefix string, author object.Signature, verbose, allowOverridingExistingBranches bool, checkCommit func() bool) error {
 	parser := yqlib.NewExpressionParser()
 	yqExpression, err := parser.ParseExpression(yqExp)
 	if err != nil {
@@ -219,10 +225,10 @@ func Apply(repo *git.Repository, yqExp, branchRegex, filePattern, msg, branchPre
 		return fmt.Errorf("failed to match branches: %s\n", err)
 	}
 
-	return apply(repo, yqExpression, branches, author, verbose, allowOverridingExistingBranches, filePattern, msg, branchPrefix, yqExp)
+	return apply(repo, yqExpression, branches, author, verbose, allowOverridingExistingBranches, filePattern, msg, branchPrefix, yqExp, checkCommit)
 }
 
-func apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.Reference, author object.Signature, verbose, allowOverridingExistingBranches bool, filePattern, msg, branchPrefix, expString string) error {
+func apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.Reference, author object.Signature, verbose, allowOverridingExistingBranches bool, filePattern, msg, branchPrefix, expString string, checkCommit func() bool) error {
 	commitTemplate, templateParseErr := template.New("").Parse(msg)
 	if templateParseErr != nil {
 		return fmt.Errorf("could not parse commit message template: %w", templateParseErr)
@@ -233,7 +239,7 @@ func apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 		newBlobObjects,
 		newTreeObjects []plumbing.MemoryObject
 
-		newBranches = make(map[plumbing.ReferenceName]plumbing.Hash)
+		newBranches = make(map[plumbing.ReferenceName]plumbing.MemoryObject)
 	)
 
 	for _, branch := range branches {
@@ -253,8 +259,9 @@ func apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 			continue
 		}
 
+		newBranches[newBranchName] = commitObj
+
 		newCommitObjects = append(newCommitObjects, commitObj)
-		newBranches[newBranchName] = commitObj.Hash()
 		newBlobObjects = append(newBlobObjects, blobObjects...)
 		newTreeObjects = append(newTreeObjects, treeObjects...)
 	}
@@ -268,9 +275,13 @@ func apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 		}
 	}
 
-	for name, hash := range newBranches {
+	for name, commitObj := range newBranches {
 		if verbose {
 			fmt.Println("updating branch", name)
+		}
+
+		if !checkCommit() {
+			continue
 		}
 
 		if !allowOverridingExistingBranches {
@@ -280,7 +291,7 @@ func apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 			}
 		}
 
-		branchRefName := plumbing.NewHashReference(name, hash)
+		branchRefName := plumbing.NewHashReference(name, commitObj.Hash())
 
 		setRefErr := repo.Storer.SetReference(branchRefName)
 		if setRefErr != nil {
@@ -732,4 +743,17 @@ func logCommitMessage(branch plumbing.Reference, obj plumbing.MemoryObject, pref
 	}
 
 	return nil
+}
+
+func trueIfYEntered(o io.Writer, r io.Reader, message string) bool {
+	for {
+		_, _ = fmt.Fprintf(o, "%s Y/n: ", message)
+
+		var input string
+		_, err := fmt.Fscanf(r, "%s\n", &input)
+		if err != nil || (input != "Y" && input != "n") {
+			continue
+		}
+		return strings.TrimSpace(input) == "Y"
+	}
 }
