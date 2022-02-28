@@ -1,4 +1,4 @@
-package main
+package qyt
 
 import (
 	"fmt"
@@ -199,7 +199,7 @@ func TestApply_update_existing_branches(t *testing.T) {
 	if !assert.NoError(t,
 		Apply(repo,
 			`.greeting = "¡Holla!"`,
-			defaultBranchRegex.String(),
+			DefaultBranchRegex().String(),
 			"*/main.yml", "set greeting\n\nQuery: {{.Query}}\n", "",
 			signature,
 			testing.Verbose(), true,
