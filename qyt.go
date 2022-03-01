@@ -31,7 +31,7 @@ func ReadMe() string {
 	return readme
 }
 
-func branchesMatchingRegex(branchPattern string, repo *git.Repository, verbose bool) ([]plumbing.Reference, error) {
+func MatchingBranches(branchPattern string, repo *git.Repository, verbose bool) ([]plumbing.Reference, error) {
 	var branches []plumbing.Reference
 
 	branchExp, err := regexp.Compile(branchPattern)
@@ -72,7 +72,7 @@ func Query(out io.Writer, repo *git.Repository, yqExp, branchRegex, filePattern 
 		return fmt.Errorf("failed to parse yq expression: %s\n", err)
 	}
 
-	branches, err := branchesMatchingRegex(branchRegex, repo, verbose)
+	branches, err := MatchingBranches(branchRegex, repo, verbose)
 	if err != nil {
 		return fmt.Errorf("failed to match branches: %s\n", err)
 	}
@@ -100,10 +100,13 @@ func query(out io.Writer, repo *git.Repository, exp *yqlib.ExpressionNode, branc
 			if readerErr != nil {
 				return readerErr
 			}
+			defer func() {
+				_ = rc.Close()
+			}()
 
 			var buf bytes.Buffer
 
-			applyExpressionErr := applyExpression(&buf, rc, exp, file.Name, map[string]string{
+			applyExpressionErr := ApplyExpression(&buf, rc, exp, file.Name, map[string]string{
 				"branch":   branch.Name().Short(),
 				"filename": file.Name,
 				"head":     branch.Hash().String(),
@@ -112,9 +115,8 @@ func query(out io.Writer, repo *git.Repository, exp *yqlib.ExpressionNode, branc
 				return fmt.Errorf("could not apply yq operation to file %q on %s: %s", file.Name, branch.Name(), applyExpressionErr)
 			}
 
-			_, _ = io.Copy(out, &buf)
-
-			return nil
+			_, err := io.Copy(out, &buf)
+			return err
 		})
 
 		if resolveMatchesErr != nil {
@@ -131,7 +133,7 @@ func Apply(repo *git.Repository, yqExp, branchRegex, filePattern, msg, branchPre
 		return fmt.Errorf("failed to parse yq expression: %s\n", err)
 	}
 
-	branches, err := branchesMatchingRegex(branchRegex, repo, verbose)
+	branches, err := MatchingBranches(branchRegex, repo, verbose)
 	if err != nil {
 		return fmt.Errorf("failed to match branches: %s\n", err)
 	}
@@ -265,7 +267,7 @@ func applyOnBranch(
 
 		var out bytes.Buffer
 
-		applyExpressionErr := applyExpression(&out, bytes.NewReader(in), exp, file.Name, map[string]string{
+		applyExpressionErr := ApplyExpression(&out, bytes.NewReader(in), exp, file.Name, map[string]string{
 			"branch":   branch.Name().Short(),
 			"filename": file.Name,
 			"head":     branch.Hash().String(),
@@ -523,7 +525,7 @@ func memoryBlobObject(buf []byte) (_ plumbing.MemoryObject, err error) {
 	return obj, nil
 }
 
-func applyExpression(w io.Writer, r io.Reader, exp *yqlib.ExpressionNode, filename string, variables map[string]string, outputToJSON bool) error {
+func ApplyExpression(w io.Writer, r io.Reader, exp *yqlib.ExpressionNode, filename string, variables map[string]string, outputToJSON bool) error {
 	var bucket yaml.Node
 	decoder := yaml.NewDecoder(r)
 	err := decoder.Decode(&bucket)
