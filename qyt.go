@@ -91,7 +91,7 @@ func query(out io.Writer, repo *git.Repository, exp *yqlib.ExpressionNode, branc
 			return objectErr
 		}
 
-		resolveMatchesErr := resolveMatchingFiles(obj, filePattern, func(file *object.File) error {
+		resolveMatchesErr := HandleMatchingFiles(obj, filePattern, func(file *object.File) error {
 			if verbose {
 				_, _ = fmt.Fprintf(out, "# \t\tmatched %q\n", file.Name)
 			}
@@ -210,6 +210,14 @@ func apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 	return nil
 }
 
+func NewScope(branch plumbing.Reference, file *object.File) map[string]string {
+	return map[string]string{
+		"branch":   branch.Name().Short(),
+		"filename": file.Name,
+		"head":     branch.Hash().String(),
+	}
+}
+
 func applyOnBranch(
 	repo *git.Repository, branch plumbing.Reference, newBranchName plumbing.ReferenceName,
 	exp *yqlib.ExpressionNode,
@@ -251,7 +259,7 @@ func applyOnBranch(
 		newTreeObjects []plumbing.MemoryObject
 	)
 
-	resolveMatchesErr := resolveMatchingFiles(obj, filePattern, func(file *object.File) error {
+	resolveMatchesErr := HandleMatchingFiles(obj, filePattern, func(file *object.File) error {
 		if verbose {
 			fmt.Printf("# \t\tmatched %q\n", file.Name)
 		}
@@ -267,11 +275,7 @@ func applyOnBranch(
 
 		var out bytes.Buffer
 
-		applyExpressionErr := ApplyExpression(&out, bytes.NewReader(in), exp, file.Name, map[string]string{
-			"branch":   branch.Name().Short(),
-			"filename": file.Name,
-			"head":     branch.Hash().String(),
-		}, false)
+		applyExpressionErr := ApplyExpression(&out, bytes.NewReader(in), exp, file.Name, NewScope(branch, file), false)
 
 		if applyExpressionErr != nil {
 			return applyExpressionErr
@@ -580,20 +584,20 @@ func scopeVariable(value string) *list.List {
 	return nodes
 }
 
-func resolveMatchingFiles(obj object.Object, pattern string, fn func(file *object.File) error) error {
+func HandleMatchingFiles(obj object.Object, pattern string, fn func(file *object.File) error) error {
 	switch o := obj.(type) {
 	case *object.Commit:
 		t, err := o.Tree()
 		if err != nil {
 			return err
 		}
-		return resolveMatchingFiles(t, pattern, fn)
+		return HandleMatchingFiles(t, pattern, fn)
 	case *object.Tag:
 		target, err := o.Object()
 		if err != nil {
 			return err
 		}
-		return resolveMatchingFiles(target, pattern, fn)
+		return HandleMatchingFiles(target, pattern, fn)
 	case *object.Tree:
 		return o.Files().ForEach(func(file *object.File) error {
 			matched, err := filepath.Match(pattern, file.Name)
