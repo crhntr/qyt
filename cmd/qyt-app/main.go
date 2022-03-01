@@ -25,7 +25,7 @@ import (
 const (
 	defaultFieldBranchRegex  = ".*"
 	defaultFieldYQExpression = "."
-	defaultFieldFileFilter   = "*"
+	defaultFieldFileFilter   = "*.yml"
 )
 
 func main() {
@@ -36,7 +36,13 @@ func main() {
 	mainWindow := myApp.NewWindow("qyt = yq * git")
 	mainWindow.Resize(fyne.NewSize(800, 600))
 
-	repo, err := git.PlainOpen("config")
+	repoPath := "."
+	if len(os.Args) > 1 {
+		repoPath = os.Args[1]
+	}
+	repo, err := git.PlainOpenWithOptions(repoPath, &git.PlainOpenOptions{
+		DetectDotGit: true,
+	})
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "failed to open repository", err)
 		os.Exit(1)
