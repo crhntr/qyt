@@ -22,6 +22,12 @@ import (
 	"github.com/crhntr/qyt"
 )
 
+const (
+	defaultFieldBranchRegex  = ".*"
+	defaultFieldYQExpression = "."
+	defaultFieldFileFilter   = "*"
+)
+
 //go:embed file_view.md
 var fileViewMD string
 
@@ -30,7 +36,7 @@ func main() {
 	logging.SetBackend(backend)
 
 	myApp := app.New()
-	mainWindow := myApp.NewWindow("TabContainer Widget")
+	mainWindow := myApp.NewWindow("qyt = yq * git")
 	mainWindow.Resize(fyne.NewSize(800, 600))
 
 	repo, err := git.PlainOpen("config")
@@ -65,9 +71,9 @@ func main() {
 		}
 	}
 
-	branchEntree.SetText(".*")
-	qyQueryEntree.SetText(".")
-	fileBlobEntree.SetText("*")
+	branchEntree.SetText(defaultFieldBranchRegex)
+	qyQueryEntree.SetText(defaultFieldYQExpression)
+	fileBlobEntree.SetText(defaultFieldFileFilter)
 
 	branchTabs := container.NewAppTabs()
 	branchEntree.OnSubmitted = handle(branchC)
@@ -84,12 +90,14 @@ func main() {
 
 	go func() {
 		var (
-			filePath   string
-			queryExp   *yqlib.ExpressionNode
-			out        = new(bytes.Buffer)
-			references []plumbing.Reference
-			expParser  = yqlib.NewExpressionParser()
+			expParser     = yqlib.NewExpressionParser()
+			filePath      = defaultFieldFileFilter
+			queryExp, _   = expParser.ParseExpression(defaultFieldYQExpression)
+			references, _ = qyt.MatchingBranches(defaultFieldBranchRegex, repo, false)
+			out           = new(bytes.Buffer)
 		)
+
+		updateUI(branchTabs, references, err, repo, filePath, queryExp)
 
 		for {
 			out.Reset()
@@ -111,38 +119,7 @@ func main() {
 				queryExp = ex
 			}
 
-			branchTabs.SetItems(nil)
-			buf := new(bytes.Buffer)
-			for _, ref := range references {
-				resultView := container.NewAppTabs()
-				bt := container.NewTabItem(ref.Name().Short(), resultView)
-				resultView.SetTabLocation(container.TabLocationLeading)
-				branchTabs.Append(bt)
-
-				var obj object.Object
-				obj, err = repo.Object(plumbing.CommitObject, ref.Hash())
-				if err != nil {
-					_, _ = fmt.Fprintln(os.Stderr, "failed to get commit", err)
-					continue
-				}
-				err = qyt.HandleMatchingFiles(obj, filePath, func(file *object.File) error {
-					rc, _ := file.Reader()
-					defer func() {
-						_ = rc.Close()
-					}()
-					buf.Reset()
-					err := qyt.ApplyExpression(buf, rc, queryExp, file.Name, qyt.NewScope(ref, file), false)
-					if err != nil {
-						return err
-					}
-					resultView.Append(container.NewTabItem(file.Name, widget.NewLabel(buf.String())))
-					return nil
-				})
-				if err != nil {
-					_, _ = fmt.Fprintln(os.Stderr, "failed run query", err)
-					continue
-				}
-			}
+			updateUI(branchTabs, references, err, repo, filePath, queryExp)
 		}
 	}()
 
@@ -153,6 +130,41 @@ func main() {
 
 	mainWindow.SetContent(mainView)
 	mainWindow.ShowAndRun()
+}
+
+func updateUI(branchTabs *container.AppTabs, references []plumbing.Reference, err error, repo *git.Repository, filePath string, queryExp *yqlib.ExpressionNode) {
+	branchTabs.SetItems(nil)
+	buf := new(bytes.Buffer)
+	for _, ref := range references {
+		resultView := container.NewAppTabs()
+		bt := container.NewTabItem(ref.Name().Short(), resultView)
+		resultView.SetTabLocation(container.TabLocationLeading)
+		branchTabs.Append(bt)
+
+		var obj object.Object
+		obj, err = repo.Object(plumbing.CommitObject, ref.Hash())
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "failed to get commit", err)
+			continue
+		}
+		err = qyt.HandleMatchingFiles(obj, filePath, func(file *object.File) error {
+			rc, _ := file.Reader()
+			defer func() {
+				_ = rc.Close()
+			}()
+			buf.Reset()
+			err := qyt.ApplyExpression(buf, rc, queryExp, file.Name, qyt.NewScope(ref, file), false)
+			if err != nil {
+				return err
+			}
+			resultView.Append(container.NewTabItem(file.Name, widget.NewLabel(buf.String())))
+			return nil
+		})
+		if err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "failed run query", err)
+			continue
+		}
+	}
 }
 
 func repoCanvasObject(repo *git.Repository, ref plumbing.Reference) (fyne.CanvasObject, error) {
