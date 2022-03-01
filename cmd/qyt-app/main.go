@@ -241,7 +241,9 @@ func (qa qytApp) runQuery(references []plumbing.Reference, repo *git.Repository,
 			toolbar.Append(widget.NewToolbarAction(theme.ContentCopyIcon(), qa.triggerCopyToClipboard))
 			contents := widget.NewRichTextWithText(buf.String())
 			contents.Wrapping = fyne.TextWrapOff
-			resultView.Append(container.NewTabItem(file.Name, container.NewVBox(toolbar, contents)))
+			box := container.NewVBox(toolbar, contents)
+			box.Layout.Layout(box.Objects, fyne.NewSize(300, 400))
+			resultView.Append(container.NewTabItem(file.Name, box))
 			return nil
 		})
 		if count == 0 {
