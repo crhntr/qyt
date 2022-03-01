@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	_ "embed"
 	"flag"
 	"fmt"
 	"io"
@@ -23,6 +24,9 @@ func init() {
 	backend := logging.NewLogBackend(io.Discard, "", 0)
 	logging.SetBackend(backend)
 }
+
+//go:embed README.md
+var readme string
 
 func main() {
 	var (
@@ -48,7 +52,7 @@ func main() {
 	// flags.BoolVar(&noConfirm, "no-confirm", false, "skip commit confirmation")
 
 	flags.Usage = func() {
-		fmt.Print(string(markdown.Render(qyt.ReadMe()+"\n## Options", 80, 0)))
+		fmt.Print(string(markdown.Render(readme+"\n## Options", 80, 0)))
 		flags.PrintDefaults()
 	}
 

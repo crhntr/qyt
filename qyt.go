@@ -24,13 +24,6 @@ func DefaultBranchRegex() *regexp.Regexp {
 	return regexp.MustCompile(`^((main)|(rel/\d+\.\d+))$`)
 }
 
-//go:embed README.md
-var readme string
-
-func ReadMe() string {
-	return readme
-}
-
 func MatchingBranches(branchPattern string, repo *git.Repository, verbose bool) ([]plumbing.Reference, error) {
 	var branches []plumbing.Reference
 
