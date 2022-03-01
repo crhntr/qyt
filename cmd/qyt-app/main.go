@@ -226,7 +226,7 @@ func (qa qytApp) runQuery(references []plumbing.Reference, repo *git.Repository,
 			return err
 		}
 		count := 0
-		err = handleMatchingFiles(obj, fileNameMatcher, func(file *object.File) error {
+		err = qyt.HandleMatchingFiles(obj, fileNameMatcher, func(file *object.File) error {
 			count++
 			rc, _ := file.Reader()
 			defer func() {
@@ -272,33 +272,4 @@ func (qa qytApp) copyToClipboard() {
 	}
 	rt, ok := fileWigetContainer.Objects[1].(*widget.RichText)
 	_ = clipboard.WriteAll(strings.TrimSpace(rt.String()))
-}
-
-func handleMatchingFiles(obj object.Object, re *regexp.Regexp, fn func(file *object.File) error) error {
-	switch o := obj.(type) {
-	case *object.Commit:
-		t, err := o.Tree()
-		if err != nil {
-			return err
-		}
-		return handleMatchingFiles(t, re, fn)
-	case *object.Tag:
-		target, err := o.Object()
-		if err != nil {
-			return err
-		}
-		return handleMatchingFiles(target, re, fn)
-	case *object.Tree:
-		return o.Files().ForEach(func(file *object.File) error {
-			if re != nil {
-				if !re.MatchString(file.Name) {
-					return nil
-				}
-			}
-			return fn(file)
-		})
-	//case *object.Blob:
-	default:
-		return object.ErrUnsupportedObject
-	}
 }

@@ -6,7 +6,6 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -78,10 +77,15 @@ func Query(out io.Writer, repo *git.Repository, yqExp, branchRegex, filePattern 
 		return fmt.Errorf("failed to match branches: %s\n", err)
 	}
 
-	return query(out, repo, yqExpression, branches, filePattern, verbose, outputToJSON)
+	fp, err := regexp.Compile(filePattern)
+	if err != nil {
+		return fmt.Errorf("failed to parse file name pattern: %s\n", err)
+	}
+
+	return query(out, repo, yqExpression, branches, fp, verbose, outputToJSON)
 }
 
-func query(out io.Writer, repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.Reference, filePattern string, verbose, outputToJSON bool) error {
+func query(out io.Writer, repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.Reference, filePattern *regexp.Regexp, verbose, outputToJSON bool) error {
 	for _, branch := range branches {
 		if verbose {
 			_, _ = fmt.Fprintf(out, "# \tquerying files on %q\n", branch.Name().Short())
@@ -92,7 +96,7 @@ func query(out io.Writer, repo *git.Repository, exp *yqlib.ExpressionNode, branc
 			return objectErr
 		}
 
-		resolveMatchesErr := handleMatchingFiles(obj, filePattern, func(file *object.File) error {
+		resolveMatchesErr := HandleMatchingFiles(obj, filePattern, func(file *object.File) error {
 			if verbose {
 				_, _ = fmt.Fprintf(out, "# \t\tmatched %q\n", file.Name)
 			}
@@ -139,10 +143,15 @@ func Apply(repo *git.Repository, yqExp, branchRegex, filePattern, msg, branchPre
 		return fmt.Errorf("failed to match branches: %s\n", err)
 	}
 
-	return apply(repo, yqExpression, branches, author, verbose, allowOverridingExistingBranches, filePattern, msg, branchPrefix, yqExp)
+	fp, err := regexp.Compile(filePattern)
+	if err != nil {
+		return fmt.Errorf("failed to parse file name pattern: %s\n", err)
+	}
+
+	return apply(repo, yqExpression, branches, author, verbose, allowOverridingExistingBranches, fp, msg, branchPrefix, yqExp)
 }
 
-func apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.Reference, author object.Signature, verbose, allowOverridingExistingBranches bool, filePattern, msg, branchPrefix, expString string) error {
+func apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.Reference, author object.Signature, verbose, allowOverridingExistingBranches bool, filePattern *regexp.Regexp, msg, branchPrefix, expString string) error {
 	commitTemplate, templateParseErr := template.New("").Parse(msg)
 	if templateParseErr != nil {
 		return fmt.Errorf("could not parse commit message template: %w", templateParseErr)
@@ -224,7 +233,7 @@ func applyOnBranch(
 	exp *yqlib.ExpressionNode,
 	commitTemplate *template.Template,
 	author object.Signature,
-	expString, filePattern string,
+	expString string, filePattern *regexp.Regexp,
 	allowOverridingExistingBranches, verbose bool,
 ) (
 	plumbing.MemoryObject, []plumbing.MemoryObject, []plumbing.MemoryObject, error,
@@ -260,7 +269,7 @@ func applyOnBranch(
 		newTreeObjects []plumbing.MemoryObject
 	)
 
-	resolveMatchesErr := handleMatchingFiles(obj, filePattern, func(file *object.File) error {
+	resolveMatchesErr := HandleMatchingFiles(obj, filePattern, func(file *object.File) error {
 		if verbose {
 			fmt.Printf("# \t\tmatched %q\n", file.Name)
 		}
@@ -585,28 +594,24 @@ func scopeVariable(value string) *list.List {
 	return nodes
 }
 
-func handleMatchingFiles(obj object.Object, pattern string, fn func(file *object.File) error) error {
+func HandleMatchingFiles(obj object.Object, re *regexp.Regexp, fn func(file *object.File) error) error {
 	switch o := obj.(type) {
 	case *object.Commit:
 		t, err := o.Tree()
 		if err != nil {
 			return err
 		}
-		return handleMatchingFiles(t, pattern, fn)
+		return HandleMatchingFiles(t, re, fn)
 	case *object.Tag:
 		target, err := o.Object()
 		if err != nil {
 			return err
 		}
-		return handleMatchingFiles(target, pattern, fn)
+		return HandleMatchingFiles(target, re, fn)
 	case *object.Tree:
 		return o.Files().ForEach(func(file *object.File) error {
-			if pattern != "" {
-				matched, err := path.Match(pattern, file.Name)
-				if err != nil {
-					return err
-				}
-				if !matched {
+			if re != nil {
+				if !re.MatchString(file.Name) {
 					return nil
 				}
 			}

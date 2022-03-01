@@ -1,7 +1,7 @@
 # QYT lets you run yq across git branches!
 
 ```
-  qyt [options] <yq_expression> <file pattern>
+  qyt [options] <yq_expression> <file_regexp>
 ```
 
 See [yq docs](https://mikefarah.gitbook.io/yq/) for query syntax.
