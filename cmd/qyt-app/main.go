@@ -70,6 +70,8 @@ type qytApp struct {
 	branchC,
 	pathC,
 	queryC chan string
+
+	copyRequestC chan struct{}
 }
 
 func initQYTApp() *qytApp {
@@ -92,6 +94,7 @@ func initQYTApp() *qytApp {
 	qa.branchC = make(chan string)
 	qa.queryC = make(chan string)
 	qa.pathC = make(chan string)
+	qa.copyRequestC = make(chan struct{})
 	handle := func(c chan string) func(string) {
 		return func(s string) { c <- s }
 	}
@@ -127,6 +130,8 @@ eventLoop:
 		out.Reset()
 
 		select {
+		case <-qa.copyRequestC:
+			qa.copyToClipboard()
 		case b := <-qa.branchC:
 			rs, err := qyt.MatchingBranches(b, repo, false)
 			if err != nil {
@@ -210,7 +215,7 @@ func (qa qytApp) runQuery(references []plumbing.Reference, repo *git.Repository,
 				return err
 			}
 			toolbar := widget.NewToolbar()
-			toolbar.Append(widget.NewToolbarAction(theme.ContentCopyIcon(), qa.copySelectedToClipboard))
+			toolbar.Append(widget.NewToolbarAction(theme.ContentCopyIcon(), qa.triggerCopyToClipboard))
 			contents := widget.NewRichTextWithText(buf.String())
 			contents.Wrapping = fyne.TextWrapOff
 			resultView.Append(container.NewTabItem(file.Name, container.NewVBox(toolbar, contents)))
@@ -226,7 +231,11 @@ func (qa qytApp) runQuery(references []plumbing.Reference, repo *git.Repository,
 	return nil
 }
 
-func (qa qytApp) copySelectedToClipboard() {
+func (qa qytApp) triggerCopyToClipboard() {
+	qa.copyRequestC <- struct{}{}
+}
+
+func (qa qytApp) copyToClipboard() {
 	branchTab := qa.branchTabs.Selected()
 	appTabs, ok := branchTab.Content.(*container.AppTabs)
 	if !ok {
