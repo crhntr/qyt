@@ -7,11 +7,14 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
+	"github.com/atotto/clipboard"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
@@ -151,7 +154,7 @@ eventLoop:
 		}
 		qa.errMessage.Hide()
 		qa.errMessage.SetText("")
-		err := runQuery(qa.branchTabs, refs, repo, fileFilter, exp)
+		err := qa.runQuery(refs, repo, fileFilter, exp)
 		if err != nil {
 			qa.errMessage.SetText(err.Error())
 			qa.errMessage.Show()
@@ -173,21 +176,21 @@ func (qa qytApp) loadInitialData(repo *git.Repository, expParser yqlib.Expressio
 	if err != nil {
 		return nil, exp, fileFilter, err
 	}
-	err = runQuery(qa.branchTabs, refs, repo, fileFilter, exp)
+	err = qa.runQuery(refs, repo, fileFilter, exp)
 	if err != nil {
 		return refs, exp, fileFilter, err
 	}
 	return refs, exp, fileFilter, nil
 }
 
-func runQuery(branchTabs *container.AppTabs, references []plumbing.Reference, repo *git.Repository, fileNameMatcher *regexp.Regexp, queryExp *yqlib.ExpressionNode) error {
-	branchTabs.SetItems(nil)
+func (qa qytApp) runQuery(references []plumbing.Reference, repo *git.Repository, fileNameMatcher *regexp.Regexp, queryExp *yqlib.ExpressionNode) error {
+	qa.branchTabs.SetItems(nil)
 	buf := new(bytes.Buffer)
 	for _, ref := range references {
 		resultView := container.NewAppTabs()
 		bt := container.NewTabItem(ref.Name().Short(), resultView)
 		resultView.SetTabLocation(container.TabLocationLeading)
-		branchTabs.Append(bt)
+		qa.branchTabs.Append(bt)
 
 		var obj object.Object
 		obj, err := repo.Object(plumbing.CommitObject, ref.Hash())
@@ -206,7 +209,11 @@ func runQuery(branchTabs *container.AppTabs, references []plumbing.Reference, re
 			if err != nil {
 				return err
 			}
-			resultView.Append(container.NewTabItem(file.Name, widget.NewLabel(buf.String())))
+			toolbar := widget.NewToolbar()
+			toolbar.Append(widget.NewToolbarAction(theme.ContentCopyIcon(), qa.copySelectedToClipboard))
+			contents := widget.NewRichTextWithText(buf.String())
+			contents.Wrapping = fyne.TextWrapOff
+			resultView.Append(container.NewTabItem(file.Name, container.NewVBox(toolbar, contents)))
 			return nil
 		})
 		if count == 0 {
@@ -217,6 +224,20 @@ func runQuery(branchTabs *container.AppTabs, references []plumbing.Reference, re
 		}
 	}
 	return nil
+}
+
+func (qa qytApp) copySelectedToClipboard() {
+	branchTab := qa.branchTabs.Selected()
+	appTabs, ok := branchTab.Content.(*container.AppTabs)
+	if !ok {
+		return
+	}
+	fileWigetContainer, ok := appTabs.Selected().Content.(*fyne.Container)
+	if !ok || len(fileWigetContainer.Objects) <= 1 {
+		return
+	}
+	rt, ok := fileWigetContainer.Objects[1].(*widget.RichText)
+	_ = clipboard.WriteAll(strings.TrimSpace(rt.String()))
 }
 
 func handleMatchingFiles(obj object.Object, re *regexp.Regexp, fn func(file *object.File) error) error {
