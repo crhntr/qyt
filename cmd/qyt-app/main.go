@@ -5,9 +5,8 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
-	"log"
 	"os"
-	"path"
+	"regexp"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -25,7 +24,7 @@ import (
 const (
 	defaultFieldBranchRegex  = ".*"
 	defaultFieldYQExpression = "."
-	defaultFieldFileFilter   = "*.yml"
+	defaultFieldFileFilter   = `(.+)\.ya?ml`
 )
 
 func main() {
@@ -48,100 +47,140 @@ func main() {
 		os.Exit(1)
 	}
 
-	var (
-		branchC = make(chan string)
-		pathC   = make(chan string)
-		queryC  = make(chan string)
-	)
-
-	form := widget.NewForm()
-	branchEntree := widget.NewEntry()
-	form.Append("Branch Query", branchEntree)
-	qyQueryEntree := widget.NewEntry()
-	form.Append("YQ Expression", qyQueryEntree)
-	fileBlobEntree := widget.NewEntry()
-	form.Append("File Glob", fileBlobEntree)
-
-	handle := func(c chan string) func(in string) {
-		return func(in string) {
-			branchEntree.Disable()
-			defer branchEntree.Enable()
-			qyQueryEntree.Disable()
-			defer qyQueryEntree.Enable()
-			fileBlobEntree.Disable()
-			defer fileBlobEntree.Enable()
-			c <- in
-		}
-	}
-
-	branchEntree.SetText(defaultFieldBranchRegex)
-	qyQueryEntree.SetText(defaultFieldYQExpression)
-	fileBlobEntree.SetText(defaultFieldFileFilter)
-
-	branchTabs := container.NewAppTabs()
-	branchEntree.OnSubmitted = handle(branchC)
-	qyQueryEntree.OnSubmitted = handle(queryC)
-	fileBlobEntree.OnSubmitted = handle(pathC)
-	defer func() {
-		branchEntree.Disable()
-		qyQueryEntree.Disable()
-		fileBlobEntree.Disable()
-		close(branchC)
-		close(queryC)
-		close(pathC)
-	}()
-
-	go func() {
-		var (
-			expParser     = yqlib.NewExpressionParser()
-			filePath      = defaultFieldFileFilter
-			queryExp, _   = expParser.ParseExpression(defaultFieldYQExpression)
-			references, _ = qyt.MatchingBranches(defaultFieldBranchRegex, repo, false)
-			out           = new(bytes.Buffer)
-		)
-
-		updateUI(branchTabs, references, err, repo, filePath, queryExp)
-
-	eventLoop:
-		for {
-			err = nil
-			out.Reset()
-			select {
-			case b := <-branchC:
-				references, err = qyt.MatchingBranches(b, repo, false)
-				if err != nil {
-					_, _ = fmt.Fprintln(os.Stderr, "failed to get matching branches", err)
-					continue eventLoop
-				}
-			case p := <-pathC:
-				_, err := path.Match(p, "")
-				if err != nil {
-					continue eventLoop
-				}
-				filePath = p
-			case q := <-queryC:
-				ex, err := expParser.ParseExpression(q)
-				if err != nil {
-					_, _ = fmt.Fprintln(os.Stderr, "failed to parse expression", err)
-					continue eventLoop
-				}
-				queryExp = ex
-			}
-
-			updateUI(branchTabs, references, err, repo, filePath, queryExp)
-		}
-	}()
-
-	mainView := container.NewVSplit(
-		form,
-		branchTabs,
-	)
-
-	mainWindow.SetContent(mainView)
+	qa := initQYTApp()
+	defer qa.Close()
+	go qa.Run(repo)
+	mainWindow.SetContent(qa.view)
 	mainWindow.ShowAndRun()
 }
 
-func updateUI(branchTabs *container.AppTabs, references []plumbing.Reference, err error, repo *git.Repository, filePath string, queryExp *yqlib.ExpressionNode) {
+type qytApp struct {
+	view *container.Split
+	form *widget.Form
+	branchEntry,
+	pathEntry,
+	queryEntry *widget.Entry
+	errMessage *widget.Label
+
+	branchTabs *container.AppTabs
+
+	branchC,
+	pathC,
+	queryC chan string
+}
+
+func initQYTApp() *qytApp {
+	qa := &qytApp{
+		form:        widget.NewForm(),
+		branchEntry: widget.NewEntry(),
+		pathEntry:   widget.NewEntry(),
+		queryEntry:  widget.NewEntry(),
+		branchTabs:  container.NewAppTabs(),
+		errMessage:  widget.NewLabelWithStyle("", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+	}
+	qa.view = container.NewVSplit(container.NewVBox(qa.form, qa.errMessage), qa.branchTabs)
+
+	qa.branchEntry.SetText(defaultFieldBranchRegex)
+	qa.pathEntry.SetText(defaultFieldFileFilter)
+	qa.queryEntry.SetText(defaultFieldYQExpression)
+	qa.form.Append("Branch Query", qa.branchEntry)
+	qa.form.Append("YQ Expression", qa.queryEntry)
+	qa.form.Append("File Glob", qa.pathEntry)
+	qa.branchC = make(chan string)
+	qa.queryC = make(chan string)
+	qa.pathC = make(chan string)
+	handle := func(c chan string) func(string) {
+		return func(s string) { c <- s }
+	}
+	qa.branchEntry.OnSubmitted = handle(qa.branchC)
+	qa.pathEntry.OnSubmitted = handle(qa.pathC)
+	qa.queryEntry.OnSubmitted = handle(qa.queryC)
+	return qa
+}
+
+func (qa qytApp) Close() {
+	qa.branchEntry.Disable()
+	qa.pathEntry.Disable()
+	qa.queryEntry.Disable()
+	close(qa.branchC)
+	close(qa.queryC)
+	close(qa.pathC)
+}
+
+func (qa qytApp) Run(repo *git.Repository) func() {
+	var (
+		expParser = yqlib.NewExpressionParser()
+		out       = new(bytes.Buffer)
+	)
+
+	refs, exp, fileFilter, initialErr := qa.loadInitialData(repo, expParser)
+	if initialErr != nil {
+		qa.errMessage.SetText(initialErr.Error())
+		qa.errMessage.Show()
+	}
+
+eventLoop:
+	for {
+		out.Reset()
+
+		select {
+		case b := <-qa.branchC:
+			rs, err := qyt.MatchingBranches(b, repo, false)
+			if err != nil {
+				qa.errMessage.SetText(err.Error())
+				qa.errMessage.Show()
+				continue eventLoop
+			}
+			refs = rs
+		case p := <-qa.pathC:
+			ff, err := regexp.Compile(p)
+			if err != nil {
+				qa.errMessage.SetText(err.Error())
+				qa.errMessage.Show()
+				continue eventLoop
+			}
+			fileFilter = ff
+		case q := <-qa.queryC:
+			ex, err := expParser.ParseExpression(q)
+			if err != nil {
+				qa.errMessage.SetText(err.Error())
+				qa.errMessage.Show()
+				continue eventLoop
+			}
+			exp = ex
+		}
+		qa.errMessage.Hide()
+		qa.errMessage.SetText("")
+		err := runQuery(qa.branchTabs, refs, repo, fileFilter, exp)
+		if err != nil {
+			qa.errMessage.SetText(err.Error())
+			qa.errMessage.Show()
+			continue eventLoop
+		}
+	}
+}
+
+func (qa qytApp) loadInitialData(repo *git.Repository, expParser yqlib.ExpressionParser) ([]plumbing.Reference, *yqlib.ExpressionNode, *regexp.Regexp, error) {
+	exp, err := expParser.ParseExpression(defaultFieldYQExpression)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	fileFilter, err := regexp.Compile(defaultFieldFileFilter)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	refs, err := qyt.MatchingBranches(defaultFieldBranchRegex, repo, false)
+	if err != nil {
+		return nil, exp, fileFilter, err
+	}
+	err = runQuery(qa.branchTabs, refs, repo, fileFilter, exp)
+	if err != nil {
+		return refs, exp, fileFilter, err
+	}
+	return refs, exp, fileFilter, nil
+}
+
+func runQuery(branchTabs *container.AppTabs, references []plumbing.Reference, repo *git.Repository, fileNameMatcher *regexp.Regexp, queryExp *yqlib.ExpressionNode) error {
 	branchTabs.SetItems(nil)
 	buf := new(bytes.Buffer)
 	for _, ref := range references {
@@ -151,13 +190,12 @@ func updateUI(branchTabs *container.AppTabs, references []plumbing.Reference, er
 		branchTabs.Append(bt)
 
 		var obj object.Object
-		obj, err = repo.Object(plumbing.CommitObject, ref.Hash())
+		obj, err := repo.Object(plumbing.CommitObject, ref.Hash())
 		if err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, "failed to get commit", err)
-			continue
+			return err
 		}
 		count := 0
-		err = qyt.HandleMatchingFiles(obj, filePath, func(file *object.File) error {
+		err = handleMatchingFiles(obj, fileNameMatcher, func(file *object.File) error {
 			count++
 			rc, _ := file.Reader()
 			defer func() {
@@ -172,11 +210,40 @@ func updateUI(branchTabs *container.AppTabs, references []plumbing.Reference, er
 			return nil
 		})
 		if count == 0 {
-			log.Printf("no files found for %s", ref.Name())
+			return fmt.Errorf("no matching files for ref %s", ref.Name())
 		}
 		if err != nil {
-			_, _ = fmt.Fprintln(os.Stderr, "failed run query", err)
-			continue
+			return err
 		}
+	}
+	return nil
+}
+
+func handleMatchingFiles(obj object.Object, re *regexp.Regexp, fn func(file *object.File) error) error {
+	switch o := obj.(type) {
+	case *object.Commit:
+		t, err := o.Tree()
+		if err != nil {
+			return err
+		}
+		return handleMatchingFiles(t, re, fn)
+	case *object.Tag:
+		target, err := o.Object()
+		if err != nil {
+			return err
+		}
+		return handleMatchingFiles(target, re, fn)
+	case *object.Tree:
+		return o.Files().ForEach(func(file *object.File) error {
+			if re != nil {
+				if !re.MatchString(file.Name) {
+					return nil
+				}
+			}
+			return fn(file)
+		})
+	//case *object.Blob:
+	default:
+		return object.ErrUnsupportedObject
 	}
 }

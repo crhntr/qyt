@@ -92,7 +92,7 @@ func query(out io.Writer, repo *git.Repository, exp *yqlib.ExpressionNode, branc
 			return objectErr
 		}
 
-		resolveMatchesErr := HandleMatchingFiles(obj, filePattern, func(file *object.File) error {
+		resolveMatchesErr := handleMatchingFiles(obj, filePattern, func(file *object.File) error {
 			if verbose {
 				_, _ = fmt.Fprintf(out, "# \t\tmatched %q\n", file.Name)
 			}
@@ -260,7 +260,7 @@ func applyOnBranch(
 		newTreeObjects []plumbing.MemoryObject
 	)
 
-	resolveMatchesErr := HandleMatchingFiles(obj, filePattern, func(file *object.File) error {
+	resolveMatchesErr := handleMatchingFiles(obj, filePattern, func(file *object.File) error {
 		if verbose {
 			fmt.Printf("# \t\tmatched %q\n", file.Name)
 		}
@@ -585,20 +585,20 @@ func scopeVariable(value string) *list.List {
 	return nodes
 }
 
-func HandleMatchingFiles(obj object.Object, pattern string, fn func(file *object.File) error) error {
+func handleMatchingFiles(obj object.Object, pattern string, fn func(file *object.File) error) error {
 	switch o := obj.(type) {
 	case *object.Commit:
 		t, err := o.Tree()
 		if err != nil {
 			return err
 		}
-		return HandleMatchingFiles(t, pattern, fn)
+		return handleMatchingFiles(t, pattern, fn)
 	case *object.Tag:
 		target, err := o.Object()
 		if err != nil {
 			return err
 		}
-		return HandleMatchingFiles(target, pattern, fn)
+		return handleMatchingFiles(target, pattern, fn)
 	case *object.Tree:
 		return o.Files().ForEach(func(file *object.File) error {
 			if pattern != "" {
