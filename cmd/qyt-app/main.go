@@ -25,10 +25,32 @@ import (
 )
 
 const (
-	defaultFieldBranchRegex  = ".*"
-	defaultFieldYQExpression = "."
-	defaultFieldFileFilter   = `(.+)\.ya?ml`
+	defaultFieldValueBranchRegex  = ".*"
+	defaultFieldValueYQExpression = "."
+	defaultFieldValueFileFilter   = `(.+)\.ya?ml`
 )
+
+func defaultFieldBranchRegex() string {
+	e := os.Getenv("QYT_BRANCH_REGEX")
+	if e != "" {
+		return e
+	}
+	return defaultFieldValueBranchRegex
+}
+func defaultFieldFileFilter() string {
+	e := os.Getenv("QYT_FILE_REGEX")
+	if e != "" {
+		return e
+	}
+	return defaultFieldValueFileFilter
+}
+func defaultFieldYQExpression() string {
+	e := os.Getenv("QYT_YQ_EXPRESSION")
+	if e != "" {
+		return e
+	}
+	return defaultFieldValueYQExpression
+}
 
 func main() {
 	backend := logging.NewLogBackend(io.Discard, "", 0)
@@ -85,9 +107,9 @@ func initQYTApp() *qytApp {
 	}
 	qa.view = container.NewVSplit(container.NewVBox(qa.form, qa.errMessage), qa.branchTabs)
 
-	qa.branchEntry.SetText(defaultFieldBranchRegex)
-	qa.pathEntry.SetText(defaultFieldFileFilter)
-	qa.queryEntry.SetText(defaultFieldYQExpression)
+	qa.branchEntry.SetText(defaultFieldBranchRegex())
+	qa.pathEntry.SetText(defaultFieldFileFilter())
+	qa.queryEntry.SetText(defaultFieldYQExpression())
 	qa.form.Append("YAML Query", qa.queryEntry)
 	qa.form.Append("Branch RegExp", qa.branchEntry)
 	qa.form.Append("File RegExp", qa.pathEntry)
@@ -170,15 +192,15 @@ eventLoop:
 }
 
 func (qa qytApp) loadInitialData(repo *git.Repository, expParser yqlib.ExpressionParser) ([]plumbing.Reference, *yqlib.ExpressionNode, *regexp.Regexp, error) {
-	exp, err := expParser.ParseExpression(defaultFieldYQExpression)
+	exp, err := expParser.ParseExpression(defaultFieldYQExpression())
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	fileFilter, err := regexp.Compile(defaultFieldFileFilter)
+	fileFilter, err := regexp.Compile(defaultFieldFileFilter())
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	refs, err := qyt.MatchingBranches(defaultFieldBranchRegex, repo, false)
+	refs, err := qyt.MatchingBranches(defaultFieldBranchRegex(), repo, false)
 	if err != nil {
 		return nil, exp, fileFilter, err
 	}
