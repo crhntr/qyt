@@ -132,6 +132,7 @@ eventLoop:
 		select {
 		case <-qa.copyRequestC:
 			qa.copyToClipboard()
+			continue eventLoop
 		case b := <-qa.branchC:
 			rs, err := qyt.MatchingBranches(b, repo, false)
 			if err != nil {
