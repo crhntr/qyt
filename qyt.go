@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -600,12 +601,14 @@ func HandleMatchingFiles(obj object.Object, pattern string, fn func(file *object
 		return HandleMatchingFiles(target, pattern, fn)
 	case *object.Tree:
 		return o.Files().ForEach(func(file *object.File) error {
-			matched, err := filepath.Match(pattern, file.Name)
-			if err != nil {
-				return err
-			}
-			if !matched {
-				return nil
+			if pattern != "" {
+				matched, err := path.Match(pattern, file.Name)
+				if err != nil {
+					return err
+				}
+				if !matched {
+					return nil
+				}
 			}
 			return fn(file)
 		})

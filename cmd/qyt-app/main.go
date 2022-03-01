@@ -5,9 +5,9 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path"
-	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -27,9 +27,6 @@ const (
 	defaultFieldYQExpression = "."
 	defaultFieldFileFilter   = "*"
 )
-
-//go:embed file_view.md
-var fileViewMD string
 
 func main() {
 	backend := logging.NewLogBackend(io.Discard, "", 0)
@@ -99,22 +96,28 @@ func main() {
 
 		updateUI(branchTabs, references, err, repo, filePath, queryExp)
 
+	eventLoop:
 		for {
+			err = nil
 			out.Reset()
 			select {
 			case b := <-branchC:
 				references, err = qyt.MatchingBranches(b, repo, false)
 				if err != nil {
 					_, _ = fmt.Fprintln(os.Stderr, "failed to get matching branches", err)
-					continue
+					continue eventLoop
 				}
 			case p := <-pathC:
+				_, err := path.Match(p, "")
+				if err != nil {
+					continue eventLoop
+				}
 				filePath = p
 			case q := <-queryC:
 				ex, err := expParser.ParseExpression(q)
 				if err != nil {
 					_, _ = fmt.Fprintln(os.Stderr, "failed to parse expression", err)
-					continue
+					continue eventLoop
 				}
 				queryExp = ex
 			}
@@ -147,7 +150,9 @@ func updateUI(branchTabs *container.AppTabs, references []plumbing.Reference, er
 			_, _ = fmt.Fprintln(os.Stderr, "failed to get commit", err)
 			continue
 		}
+		count := 0
 		err = qyt.HandleMatchingFiles(obj, filePath, func(file *object.File) error {
+			count++
 			rc, _ := file.Reader()
 			defer func() {
 				_ = rc.Close()
@@ -160,130 +165,12 @@ func updateUI(branchTabs *container.AppTabs, references []plumbing.Reference, er
 			resultView.Append(container.NewTabItem(file.Name, widget.NewLabel(buf.String())))
 			return nil
 		})
+		if count == 0 {
+			log.Printf("no files found for %s", ref.Name())
+		}
 		if err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, "failed run query", err)
 			continue
 		}
 	}
-}
-
-func repoCanvasObject(repo *git.Repository, ref plumbing.Reference) (fyne.CanvasObject, error) {
-	commit, err := repo.CommitObject(ref.Hash())
-	if err != nil {
-		return nil, err
-	}
-	tree, err := repo.TreeObject(commit.TreeHash)
-	if err != nil {
-		return nil, err
-	}
-	rootNode := parseNodes(tree)
-
-	treeView := widget.NewTree(
-		func(id widget.TreeNodeID) []widget.TreeNodeID {
-			c, _ := rootNode.find(id)
-			names := c.childNames()
-			return names
-		},
-		func(id widget.TreeNodeID) bool {
-			c, ok := rootNode.find(id)
-			if !ok {
-				return false
-			}
-			return c.isBranch()
-		},
-		func(b bool) fyne.CanvasObject {
-			return widget.NewLabel("")
-		},
-		func(id widget.TreeNodeID, b bool, canvasObject fyne.CanvasObject) {
-			canvasObject.(*widget.Label).SetText(fmt.Sprintf("%s", path.Base(id)))
-		},
-	)
-
-	textView := widget.NewRichTextFromMarkdown("")
-
-	treeView.OnSelected = func(uid widget.TreeNodeID) {
-		n, ok := rootNode.find(uid)
-		if !ok || n.isBranch() {
-			return
-		}
-		f, err := tree.File(uid)
-		if err != nil {
-			return
-		}
-		rc, _ := f.Reader()
-		defer func() {
-			_ = rc.Close()
-		}()
-		buf, _ := io.ReadAll(io.LimitReader(rc, 1<<20))
-		textView.ParseMarkdown("---\n```yml" + string(buf) + "\n```\n")
-		textView.Wrapping = fyne.TextWrapOff
-	}
-
-	return container.NewHSplit(treeView, textView), nil
-}
-
-type node struct {
-	Path     string
-	Children []node
-}
-
-func (d node) name() string {
-	return path.Base(d.Path)
-}
-
-func (d node) isBranch() bool {
-	return len(d.Children) > 0
-}
-
-func (d node) find(s string) (node, bool) {
-	if d.Path == s {
-		return d, true
-	}
-	for _, c := range d.Children {
-		sepIndex := strings.IndexByte(s, '/')
-		if sepIndex < 0 && c.Path == s {
-			return c, true
-		}
-
-		if sepIndex >= 0 && sepIndex <= len(c.Path) {
-			if s[:sepIndex] == c.Path[:sepIndex] {
-				return c.find(s)
-			}
-		}
-	}
-	return node{}, false
-}
-
-func (d *node) addPrefix(s string) {
-	for i := range d.Children {
-		d.Children[i].Path = path.Join(s, d.Children[i].Path)
-		d.Children[i].addPrefix(s)
-	}
-}
-
-func (d node) childNames() []string {
-	if len(d.Children) == 0 {
-		return nil
-	}
-	result := make([]string, 0, len(d.Children))
-	for _, c := range d.Children {
-		result = append(result, c.Path)
-	}
-	return result
-}
-
-func parseNodes(tree *object.Tree) node {
-	var n node
-	for _, entry := range tree.Entries {
-		t, err := tree.Tree(entry.Name)
-		if err != nil {
-			n.Children = append(n.Children, node{Path: entry.Name})
-			continue
-		}
-		d := parseNodes(t)
-		d.Path = entry.Name
-		d.addPrefix(entry.Name)
-		n.Children = append(n.Children, d)
-	}
-	return n
 }
