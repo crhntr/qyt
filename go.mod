@@ -5,7 +5,6 @@ go 1.18
 require (
 	fyne.io/fyne/v2 v2.1.3
 	github.com/MichaelMure/go-term-markdown v0.1.4
-	github.com/atotto/clipboard v0.1.4
 	github.com/go-git/go-billy/v5 v5.3.1
 	github.com/go-git/go-git/v5 v5.3.0
 	github.com/mikefarah/yq/v4 v4.7.1

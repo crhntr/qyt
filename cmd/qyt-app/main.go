@@ -7,14 +7,12 @@ import (
 	"io"
 	"os"
 	"regexp"
-	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-	"github.com/atotto/clipboard"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
@@ -72,7 +70,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	qa := initQYTApp()
+	qa := initQYTApp(mainWindow)
 	defer qa.Close()
 	go qa.Run(repo)
 	mainWindow.SetContent(qa.view)
@@ -80,8 +78,9 @@ func main() {
 }
 
 type qytApp struct {
-	view *container.Split
-	form *widget.Form
+	window fyne.Window
+	view   *container.Split
+	form   *widget.Form
 	branchEntry,
 	pathEntry,
 	queryEntry *widget.Entry
@@ -96,8 +95,9 @@ type qytApp struct {
 	copyRequestC chan struct{}
 }
 
-func initQYTApp() *qytApp {
+func initQYTApp(mainWindow fyne.Window) *qytApp {
 	qa := &qytApp{
+		window:      mainWindow,
 		form:        widget.NewForm(),
 		branchEntry: widget.NewEntry(),
 		pathEntry:   widget.NewEntry(),
@@ -271,5 +271,8 @@ func (qa qytApp) copyToClipboard() {
 		return
 	}
 	rt, ok := fileWigetContainer.Objects[1].(*widget.RichText)
-	_ = clipboard.WriteAll(strings.TrimSpace(rt.String()))
+	if !ok {
+		return
+	}
+	qa.window.Clipboard().SetContent(rt.String())
 }
