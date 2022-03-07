@@ -110,10 +110,7 @@ func (qa qytApp) Close() {
 }
 
 func (qa qytApp) Run(repo *git.Repository) func() {
-	var (
-		expParser = yqlib.NewExpressionParser()
-		out       = new(bytes.Buffer)
-	)
+	expParser := yqlib.NewExpressionParser()
 
 	refs, exp, fileFilter, initialErr := qa.loadInitialData(repo, expParser)
 	if initialErr != nil {
@@ -121,46 +118,47 @@ func (qa qytApp) Run(repo *git.Repository) func() {
 		qa.errMessage.Show()
 	}
 
-eventLoop:
-	for {
-		out.Reset()
-
-		select {
-		case <-qa.copyRequestC:
-			qa.copyToClipboard()
-			continue eventLoop
-		case b := <-qa.branchC:
-			rs, err := qyt.MatchingBranches(b, repo, false)
-			if err != nil {
-				qa.errMessage.SetText(err.Error())
-				qa.errMessage.Show()
-				continue eventLoop
-			}
-			refs = rs
-		case p := <-qa.pathC:
-			ff, err := regexp.Compile(p)
-			if err != nil {
-				qa.errMessage.SetText(err.Error())
-				qa.errMessage.Show()
-				continue eventLoop
-			}
-			fileFilter = ff
-		case q := <-qa.queryC:
-			ex, err := expParser.ParseExpression(q)
-			if err != nil {
-				qa.errMessage.SetText(err.Error())
-				qa.errMessage.Show()
-				continue eventLoop
-			}
-			exp = ex
-		}
+	updateResult := func() {
 		qa.errMessage.Hide()
 		qa.errMessage.SetText("")
 		err := qa.runQuery(refs, repo, fileFilter, exp)
 		if err != nil {
 			qa.errMessage.SetText(err.Error())
 			qa.errMessage.Show()
-			continue eventLoop
+		}
+	}
+
+	for {
+		select {
+		case <-qa.copyRequestC:
+			qa.copyToClipboard()
+		case b := <-qa.branchC:
+			rs, err := qyt.MatchingBranches(b, repo, false)
+			if err != nil {
+				qa.errMessage.SetText(err.Error())
+				qa.errMessage.Show()
+				break
+			}
+			refs = rs
+			updateResult()
+		case p := <-qa.pathC:
+			ff, err := regexp.Compile(p)
+			if err != nil {
+				qa.errMessage.SetText(err.Error())
+				qa.errMessage.Show()
+				break
+			}
+			fileFilter = ff
+			updateResult()
+		case q := <-qa.queryC:
+			ex, err := expParser.ParseExpression(q)
+			if err != nil {
+				qa.errMessage.SetText(err.Error())
+				qa.errMessage.Show()
+				break
+			}
+			exp = ex
+			updateResult()
 		}
 	}
 }
@@ -240,11 +238,11 @@ func (qa qytApp) copyToClipboard() {
 	if !ok {
 		return
 	}
-	fileWigetContainer, ok := appTabs.Selected().Content.(*fyne.Container)
-	if !ok || len(fileWigetContainer.Objects) <= 1 {
+	fileWidgetContainer, ok := appTabs.Selected().Content.(*fyne.Container)
+	if !ok || len(fileWidgetContainer.Objects) <= 1 {
 		return
 	}
-	rt, ok := fileWigetContainer.Objects[1].(*widget.RichText)
+	rt, ok := fileWidgetContainer.Objects[1].(*widget.RichText)
 	if !ok {
 		return
 	}
