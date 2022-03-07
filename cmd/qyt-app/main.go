@@ -95,7 +95,9 @@ func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Reposit
 	}
 	qa.commitC = make(chan struct{})
 	qa.commitButton = widget.NewButton("Commit", qa.triggerCommit)
-	qa.view = container.NewVSplit(container.NewVBox(qa.form, qa.commitButton, qa.errMessage), qa.branchTabs)
+	hitEnterTip := widget.NewLabel("Hit Enter to Run Query")
+	hitEnterTip.Hide()
+	qa.view = container.NewVSplit(container.NewVBox(qa.form, hitEnterTip, qa.commitButton, qa.errMessage), qa.branchTabs)
 
 	qa.branchEntry.Validator = func(s string) error {
 		_, err := regexp.Compile(s)
@@ -123,6 +125,15 @@ func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Reposit
 	qa.queryEntry.SetText(qa.config.Query)
 	qa.queryEntry.OnSubmitted = func(string) {
 		qa.form.OnSubmit()
+	}
+	qa.branchEntry.OnChanged = func(string) {
+		hitEnterTip.Show()
+	}
+	qa.pathEntry.OnChanged = func(string) {
+		hitEnterTip.Show()
+	}
+	qa.queryEntry.OnChanged = func(string) {
+		hitEnterTip.Show()
 	}
 	qa.form.Append("YAML Query", qa.queryEntry)
 	qa.form.Append("Branch RegExp", qa.branchEntry)
