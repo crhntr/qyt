@@ -1,18 +1,14 @@
 package main
 
 import (
-	"bytes"
 	_ "embed"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"regexp"
 
-	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/theme"
-	"fyne.io/fyne/v2/widget"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
@@ -22,41 +18,9 @@ import (
 	"github.com/crhntr/qyt"
 )
 
-const (
-	defaultFieldValueBranchRegex  = ".*"
-	defaultFieldValueYQExpression = "."
-	defaultFieldValueFileFilter   = `(.+)\.ya?ml`
-)
-
-func defaultFieldBranchRegex() string {
-	e := os.Getenv("QYT_BRANCH_REGEX")
-	if e != "" {
-		return e
-	}
-	return defaultFieldValueBranchRegex
-}
-func defaultFieldFileFilter() string {
-	e := os.Getenv("QYT_FILE_REGEX")
-	if e != "" {
-		return e
-	}
-	return defaultFieldValueFileFilter
-}
-func defaultFieldYQExpression() string {
-	e := os.Getenv("QYT_YQ_EXPRESSION")
-	if e != "" {
-		return e
-	}
-	return defaultFieldValueYQExpression
-}
-
 func main() {
 	backend := logging.NewLogBackend(io.Discard, "", 0)
 	logging.SetBackend(backend)
-
-	myApp := app.New()
-	mainWindow := myApp.NewWindow("qyt = yq * git")
-	mainWindow.Resize(fyne.NewSize(800, 600))
 
 	repoPath := "."
 	if len(os.Args) > 1 {
@@ -70,209 +34,250 @@ func main() {
 		os.Exit(1)
 	}
 
-	qa := initQYTApp(mainWindow)
-	defer qa.Close()
-	go qa.Run(repo)
-	mainWindow.SetContent(qa.view)
-	mainWindow.ShowAndRun()
+	c := newController(repo)
+
+	myApp := app.New()
+	c.view = createView(myApp, c)
+
+	c.view.SetBranchInputValue(defaultFieldBranchRegex())
+	c.view.Window().ShowAndRun()
 }
 
-type qytApp struct {
-	window fyne.Window
-	view   *container.Split
-	form   *widget.Form
-	branchEntry,
-	pathEntry,
-	queryEntry *widget.Entry
-	errMessage *widget.Label
+type qytController struct {
+	repo *git.Repository
 
-	branchTabs *container.AppTabs
+	branchExp, fileExp *regexp.Regexp
+	queryExpression    *yqlib.ExpressionNode
 
-	branchC,
-	pathC,
-	queryC chan string
+	selectedBranchIndex, selectedFileIndex int
 
-	copyRequestC chan struct{}
+	branches    []plumbing.Reference
+	files       []object.File
+	filesCache  map[plumbing.Reference][]object.File
+	queryResult string
+
+	view view
 }
 
-func initQYTApp(mainWindow fyne.Window) *qytApp {
-	qa := &qytApp{
-		window:      mainWindow,
-		form:        widget.NewForm(),
-		branchEntry: widget.NewEntry(),
-		pathEntry:   widget.NewEntry(),
-		queryEntry:  widget.NewEntry(),
-		branchTabs:  container.NewAppTabs(),
-		errMessage:  widget.NewLabelWithStyle("", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+func newController(repo *git.Repository) *qytController {
+	return &qytController{
+		repo:       repo,
+		filesCache: make(map[plumbing.Reference][]object.File),
 	}
-	qa.view = container.NewVSplit(container.NewVBox(qa.form, qa.errMessage), qa.branchTabs)
+}
 
-	qa.branchEntry.SetText(defaultFieldBranchRegex())
-	qa.pathEntry.SetText(defaultFieldFileFilter())
-	qa.queryEntry.SetText(defaultFieldYQExpression())
-	qa.form.Append("YAML Query", qa.queryEntry)
-	qa.form.Append("Branch RegExp", qa.branchEntry)
-	qa.form.Append("File RegExp", qa.pathEntry)
-	qa.branchC = make(chan string)
-	qa.queryC = make(chan string)
-	qa.pathC = make(chan string)
-	qa.copyRequestC = make(chan struct{})
-	handle := func(c chan string) func(string) {
-		return func(s string) { c <- s }
+func (qa *qytController) SetSelectedBranch(i int) {
+	qa.selectedBranchIndex = i
+	log.Println("SetSelectedBranch", i)
+	if len(qa.branches) == 0 {
+		return
 	}
-	qa.branchEntry.OnSubmitted = handle(qa.branchC)
-	qa.pathEntry.OnSubmitted = handle(qa.pathC)
-	qa.queryEntry.OnSubmitted = handle(qa.queryC)
-	return qa
+	ref := qa.branches[i]
+	qa.files = qa.filesCache[ref]
+	qa.view.SetFiles(ref, qa.files, 0)
 }
 
-func (qa qytApp) Close() {
-	qa.branchEntry.Disable()
-	qa.pathEntry.Disable()
-	qa.queryEntry.Disable()
-	close(qa.branchC)
-	close(qa.queryC)
-	close(qa.pathC)
+func (qa *qytController) SetSelectedFile(ref plumbing.Reference, i int) {
+	qa.selectedFileIndex = i
+	log.Println("SetSelectedFile", ref.Hash(), i)
 }
 
-func (qa qytApp) Run(repo *git.Repository) func() {
-	var (
-		expParser = yqlib.NewExpressionParser()
-		out       = new(bytes.Buffer)
-	)
+func (qa *qytController) SetInputBranchFilter(s string) {
+	log.Println("SetInputBranchFilter", s)
 
-	refs, exp, fileFilter, initialErr := qa.loadInitialData(repo, expParser)
-	if initialErr != nil {
-		qa.errMessage.SetText(initialErr.Error())
-		qa.errMessage.Show()
+	qa.view.ClearErrorMessage()
+
+	refs, err := qyt.MatchingBranches(s, qa.repo, false)
+	qa.branches = refs
+	if err != nil {
+		qa.view.SetBranches(nil, 0)
+		qa.view.SetErrorMessage(err.Error())
+		return
+	}
+	if len(refs) == 0 {
+		qa.view.SetBranches(nil, 0)
+		return
 	}
 
-eventLoop:
-	for {
-		out.Reset()
+	for k := range qa.filesCache {
+		delete(qa.filesCache, k)
+	}
 
-		select {
-		case <-qa.copyRequestC:
-			qa.copyToClipboard()
-			continue eventLoop
-		case b := <-qa.branchC:
-			rs, err := qyt.MatchingBranches(b, repo, false)
-			if err != nil {
-				qa.errMessage.SetText(err.Error())
-				qa.errMessage.Show()
-				continue eventLoop
-			}
-			refs = rs
-		case p := <-qa.pathC:
-			ff, err := regexp.Compile(p)
-			if err != nil {
-				qa.errMessage.SetText(err.Error())
-				qa.errMessage.Show()
-				continue eventLoop
-			}
-			fileFilter = ff
-		case q := <-qa.queryC:
-			ex, err := expParser.ParseExpression(q)
-			if err != nil {
-				qa.errMessage.SetText(err.Error())
-				qa.errMessage.Show()
-				continue eventLoop
-			}
-			exp = ex
-		}
-		qa.errMessage.Hide()
-		qa.errMessage.SetText("")
-		err := qa.runQuery(refs, repo, fileFilter, exp)
+	for _, ref := range refs {
+		c, err := qa.repo.CommitObject(ref.Hash())
 		if err != nil {
-			qa.errMessage.SetText(err.Error())
-			qa.errMessage.Show()
-			continue eventLoop
+			continue
 		}
-	}
-}
-
-func (qa qytApp) loadInitialData(repo *git.Repository, expParser yqlib.ExpressionParser) ([]plumbing.Reference, *yqlib.ExpressionNode, *regexp.Regexp, error) {
-	exp, err := expParser.ParseExpression(defaultFieldYQExpression())
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	fileFilter, err := regexp.Compile(defaultFieldFileFilter())
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	refs, err := qyt.MatchingBranches(defaultFieldBranchRegex(), repo, false)
-	if err != nil {
-		return nil, exp, fileFilter, err
-	}
-	err = qa.runQuery(refs, repo, fileFilter, exp)
-	if err != nil {
-		return refs, exp, fileFilter, err
-	}
-	return refs, exp, fileFilter, nil
-}
-
-func (qa qytApp) runQuery(references []plumbing.Reference, repo *git.Repository, fileNameMatcher *regexp.Regexp, queryExp *yqlib.ExpressionNode) error {
-	qa.branchTabs.SetItems(nil)
-	buf := new(bytes.Buffer)
-	for _, ref := range references {
-		resultView := container.NewAppTabs()
-		bt := container.NewTabItem(ref.Name().Short(), resultView)
-		resultView.SetTabLocation(container.TabLocationLeading)
-		qa.branchTabs.Append(bt)
-
-		var obj object.Object
-		obj, err := repo.Object(plumbing.CommitObject, ref.Hash())
+		fileIter, err := c.Files()
 		if err != nil {
-			return err
+			continue
 		}
-		count := 0
-		err = qyt.HandleMatchingFiles(obj, fileNameMatcher, func(file *object.File) error {
-			count++
-			rc, _ := file.Reader()
-			defer func() {
-				_ = rc.Close()
-			}()
-			buf.Reset()
-			err := qyt.ApplyExpression(buf, rc, queryExp, file.Name, qyt.NewScope(ref, file), false)
-			if err != nil {
-				return err
-			}
-			toolbar := widget.NewToolbar()
-			toolbar.Append(widget.NewToolbarAction(theme.ContentCopyIcon(), qa.triggerCopyToClipboard))
-			contents := widget.NewRichTextWithText(buf.String())
-			contents.Wrapping = fyne.TextWrapOff
-			box := container.NewVBox(toolbar, contents)
-			box.Layout.Layout(box.Objects, fyne.NewSize(300, 400))
-			resultView.Append(container.NewTabItem(file.Name, box))
+		var files []object.File
+		_ = fileIter.ForEach(func(file *object.File) error {
+			files = append(files, *file)
 			return nil
 		})
-		if count == 0 {
-			return fmt.Errorf("no matching files for ref %s", ref.Name())
-		}
-		if err != nil {
-			return err
-		}
+		qa.filesCache[ref] = files
 	}
-	return nil
+
+	qa.view.SetBranches(refs, 0)
 }
 
-func (qa qytApp) triggerCopyToClipboard() {
-	qa.copyRequestC <- struct{}{}
+func (qa *qytController) SetInputFilePathFilter(s string) {
+	log.Println("SetInputFilePathFilter", s)
+
+	qa.view.ClearErrorMessage()
+
+	//obj, err := qa.repo.Object(plumbing.CommitObject, ref.Hash())
+	//if err != nil {
+	//	return err
+	//}
+	//
+	//qyt.HandleMatchingFiles()
 }
 
-func (qa qytApp) copyToClipboard() {
-	branchTab := qa.branchTabs.Selected()
-	appTabs, ok := branchTab.Content.(*container.AppTabs)
-	if !ok {
-		return
-	}
-	fileWigetContainer, ok := appTabs.Selected().Content.(*fyne.Container)
-	if !ok || len(fileWigetContainer.Objects) <= 1 {
-		return
-	}
-	rt, ok := fileWigetContainer.Objects[1].(*widget.RichText)
-	if !ok {
-		return
-	}
-	qa.window.Clipboard().SetContent(rt.String())
+func (qa *qytController) SetInputQuery(s string) {
+	log.Println("SetInputQuery", s)
 }
+
+//func (qa qytApp) Run(repo *git.Repository) func() {
+//	var (
+//		expParser = yqlib.NewExpressionParser()
+//		out       = new(bytes.Buffer)
+//	)
+//
+//	refs, exp, fileFilter, initialErr := qa.loadInitialData(repo, expParser)
+//	if initialErr != nil {
+//		qa.errMessage.SetText(initialErr.Error())
+//		qa.errMessage.Show()
+//	}
+//
+//eventLoop:
+//	for {
+//		out.Reset()
+//
+//		select {
+//		case <-qa.copyRequestC:
+//			qa.copyToClipboard()
+//			continue eventLoop
+//		case b := <-qa.branchC:
+//			rs, err := qyt.MatchingBranches(b, repo, false)
+//			if err != nil {
+//				qa.errMessage.SetText(err.Error())
+//				qa.errMessage.Show()
+//				continue eventLoop
+//			}
+//			refs = rs
+//		case p := <-qa.pathC:
+//			ff, err := regexp.Compile(p)
+//			if err != nil {
+//				qa.errMessage.SetText(err.Error())
+//				qa.errMessage.Show()
+//				continue eventLoop
+//			}
+//			fileFilter = ff
+//		case q := <-qa.queryC:
+//			ex, err := expParser.ParseExpression(q)
+//			if err != nil {
+//				qa.errMessage.SetText(err.Error())
+//				qa.errMessage.Show()
+//				continue eventLoop
+//			}
+//			exp = ex
+//		}
+//		qa.errMessage.Hide()
+//		qa.errMessage.SetText("")
+//		err := qa.runQuery(refs, repo, fileFilter, exp)
+//		if err != nil {
+//			qa.errMessage.SetText(err.Error())
+//			qa.errMessage.Show()
+//			continue eventLoop
+//		}
+//	}
+//}
+//
+//func (qa qytApp) loadInitialData(repo *git.Repository, expParser yqlib.ExpressionParser) ([]plumbing.Reference, *yqlib.ExpressionNode, *regexp.Regexp, error) {
+//	exp, err := expParser.ParseExpression(defaultFieldYQExpression())
+//	if err != nil {
+//		return nil, nil, nil, err
+//	}
+//	fileFilter, err := regexp.Compile(defaultFieldFileFilter())
+//	if err != nil {
+//		return nil, nil, nil, err
+//	}
+//	refs, err := qyt.MatchingBranches(defaultFieldBranchRegex(), repo, false)
+//	if err != nil {
+//		return nil, exp, fileFilter, err
+//	}
+//	err = qa.runQuery(refs, repo, fileFilter, exp)
+//	if err != nil {
+//		return refs, exp, fileFilter, err
+//	}
+//	return refs, exp, fileFilter, nil
+//}
+//
+//func (qa qytApp) runQuery(references []plumbing.Reference, repo *git.Repository, fileNameMatcher *regexp.Regexp, queryExp *yqlib.ExpressionNode) error {
+//	qa.branchTabs.SetItems(nil)
+//	buf := new(bytes.Buffer)
+//	for _, ref := range references {
+//		resultView := container.NewAppTabs()
+//		bt := container.NewTabItem(ref.Name().Short(), resultView)
+//		resultView.SetTabLocation(container.TabLocationLeading)
+//		qa.branchTabs.Append(bt)
+//
+//		var obj object.Object
+//		obj, err := repo.Object(plumbing.CommitObject, ref.Hash())
+//		if err != nil {
+//			return err
+//		}
+//		count := 0
+//		err = qyt.HandleMatchingFiles(obj, fileNameMatcher, func(file *object.File) error {
+//			count++
+//			rc, _ := file.Reader()
+//			defer func() {
+//				_ = rc.Close()
+//			}()
+//			buf.Reset()
+//			err := qyt.ApplyExpression(buf, rc, queryExp, file.Name, qyt.NewScope(ref, file), false)
+//			if err != nil {
+//				return err
+//			}
+//			toolbar := widget.NewToolbar()
+//			toolbar.Append(widget.NewToolbarAction(theme.ContentCopyIcon(), qa.triggerCopyToClipboard))
+//			contents := widget.NewRichTextWithText(buf.String())
+//			contents.Wrapping = fyne.TextWrapOff
+//			box := container.NewVBox(toolbar, contents)
+//			box.Layout.Layout(box.Objects, fyne.NewSize(300, 400))
+//			resultView.Append(container.NewTabItem(file.Name, box))
+//			return nil
+//		})
+//		if count == 0 {
+//			return fmt.Errorf("no matching files for ref %s", ref.Name())
+//		}
+//		if err != nil {
+//			return err
+//		}
+//	}
+//	return nil
+//}
+//
+//func (qa qytApp) triggerCopyToClipboard() {
+//	qa.copyRequestC <- struct{}{}
+//}
+//
+//func (qa qytApp) copyToClipboard() {
+//	branchTab := qa.branchTabs.Selected()
+//	appTabs, ok := branchTab.Content.(*container.AppTabs)
+//	if !ok {
+//		return
+//	}
+//	fileWigetContainer, ok := appTabs.Selected().Content.(*fyne.Container)
+//	if !ok || len(fileWigetContainer.Objects) <= 1 {
+//		return
+//	}
+//	rt, ok := fileWigetContainer.Objects[1].(*widget.RichText)
+//	if !ok {
+//		return
+//	}
+//	qa.window.Clipboard().SetContent(rt.String())
+//}
