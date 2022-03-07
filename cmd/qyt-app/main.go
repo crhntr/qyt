@@ -46,6 +46,7 @@ func main() {
 	})
 	mainWindow := myApp.NewWindow("qyt = yq * git")
 	mainWindow.Resize(fyne.NewSize(1200, 900))
+	mainWindow.SetFixedSize(false)
 
 	repo, err := loadRepo(qytConfig)
 	if err != nil {
@@ -75,11 +76,7 @@ type qytApp struct {
 
 	branchTabs *container.AppTabs
 
-	branchC,
-	pathC,
-	queryC chan string
-
-	copyRequestC, commitC chan struct{}
+	copyRequestC, commitC, queryC chan struct{}
 }
 
 func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Repository) *qytApp {
@@ -116,21 +113,25 @@ func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Reposit
 		return err
 	}
 	qa.branchEntry.SetText(qa.config.BranchFilter)
+	qa.branchEntry.OnSubmitted = func(string) {
+		qa.form.OnSubmit()
+	}
 	qa.pathEntry.SetText(qa.config.FileNameFilter)
+	qa.pathEntry.OnSubmitted = func(string) {
+		qa.form.OnSubmit()
+	}
 	qa.queryEntry.SetText(qa.config.Query)
+	qa.queryEntry.OnSubmitted = func(string) {
+		qa.form.OnSubmit()
+	}
 	qa.form.Append("YAML Query", qa.queryEntry)
 	qa.form.Append("Branch RegExp", qa.branchEntry)
 	qa.form.Append("File RegExp", qa.pathEntry)
-	qa.branchC = make(chan string)
-	qa.queryC = make(chan string)
-	qa.pathC = make(chan string)
 	qa.copyRequestC = make(chan struct{})
-	handle := func(c chan string) func(string) {
-		return func(s string) { c <- s }
+	qa.queryC = make(chan struct{})
+	qa.form.OnSubmit = func() {
+		qa.queryC <- struct{}{}
 	}
-	qa.branchEntry.OnSubmitted = handle(qa.branchC)
-	qa.pathEntry.OnSubmitted = handle(qa.pathC)
-	qa.queryEntry.OnSubmitted = handle(qa.queryC)
 
 	return qa
 }
@@ -157,19 +158,13 @@ func (qa qytApp) enableInput() {
 
 func (qa qytApp) Close() {
 	qa.disableInput()
-	close(qa.branchC)
 	close(qa.queryC)
-	close(qa.pathC)
+	close(qa.copyRequestC)
+	close(qa.commitC)
 }
 
 func (qa qytApp) Run() func() {
-	branchFilter, fileFilter, exp, initialErr := qa.loadInitialData()
-	if initialErr != nil {
-		qa.errMessage.SetText(initialErr.Error())
-		qa.errMessage.Show()
-	}
-
-	qa.runQuery(qa.repo, branchFilter, fileFilter, exp)
+	qa.runQuery(qa.repo)
 
 	defer log.Println("done running")
 
@@ -188,39 +183,12 @@ func (qa qytApp) Run() func() {
 			if err != nil {
 				log.Fatal(err)
 			}
-			qa.runQuery(qa.repo, branchFilter, fileFilter, exp)
+			qa.runQuery(qa.repo)
 		case <-qa.copyRequestC:
 			qa.copyToClipboard()
-		case b := <-qa.branchC:
+		case <-qa.queryC:
 			qa.disableInput()
-			bf, err := regexp.Compile(b)
-			if err != nil {
-				qa.errMessage.SetText(err.Error())
-				qa.errMessage.Show()
-				break
-			}
-			branchFilter = bf
-			qa.runQuery(qa.repo, branchFilter, fileFilter, exp)
-		case p := <-qa.pathC:
-			qa.disableInput()
-			ff, err := regexp.Compile(p)
-			if err != nil {
-				qa.errMessage.SetText(err.Error())
-				qa.errMessage.Show()
-				break
-			}
-			fileFilter = ff
-			qa.runQuery(qa.repo, branchFilter, fileFilter, exp)
-		case q := <-qa.queryC:
-			qa.disableInput()
-			ex, err := qa.expParser.ParseExpression(q)
-			if err != nil {
-				qa.errMessage.SetText(err.Error())
-				qa.errMessage.Show()
-				break
-			}
-			exp = ex
-			qa.runQuery(qa.repo, branchFilter, fileFilter, exp)
+			qa.runQuery(qa.repo)
 		}
 	}
 }
@@ -258,7 +226,7 @@ const (
 	FileViewNameDiff   = "Diff"
 )
 
-func (qa qytApp) loadInitialData() (*regexp.Regexp, *regexp.Regexp, *yqlib.ExpressionNode, error) {
+func (qa qytApp) loadFields() (*regexp.Regexp, *regexp.Regexp, *yqlib.ExpressionNode, error) {
 	exp, err := qa.expParser.ParseExpression(qa.queryEntry.Text)
 	if err != nil {
 		return nil, nil, nil, err
@@ -274,15 +242,17 @@ func (qa qytApp) loadInitialData() (*regexp.Regexp, *regexp.Regexp, *yqlib.Expre
 	return branchFilter, fileFilter, exp, nil
 }
 
-func (qa qytApp) runQuery(repo *git.Repository, branchFilter, fileFilter *regexp.Regexp, queryExp *yqlib.ExpressionNode) {
+func (qa qytApp) runQuery(repo *git.Repository) {
+	branchFilter, fileFilter, queryExp, err := qa.loadFields()
+	if err != nil {
+		qa.errMessage.SetText(err.Error())
+		qa.errMessage.Show()
+		return
+	}
+
 	qa.errMessage.Hide()
 	qa.errMessage.SetText("")
 	qa.branchTabs.SetItems(nil)
-
-	qa.window.SetFixedSize(true)
-	defer func() {
-		qa.window.SetFixedSize(false)
-	}()
 
 	references, err := qyt.MatchingBranches(branchFilter.String(), qa.repo, false)
 	if err != nil {
@@ -403,11 +373,11 @@ func (qa qytApp) selectedFileContents() string {
 	if len(fileViews.Items) == 0 {
 		return ""
 	}
-	cont, ok := fileViews.Items[0].Content.(*fyne.Container)
+	cont, ok := fileViews.Items[0].Content.(*container.Scroll).Content.(*fyne.Container)
 	if !ok || len(cont.Objects) <= 1 {
 		panic("failed to get result view")
 	}
-	rt, ok := cont.Objects[1].(*container.Scroll).Content.(*widget.RichText)
+	rt, ok := cont.Objects[1].(*widget.RichText)
 	if !ok {
 		panic("failed to get selected files")
 	}
