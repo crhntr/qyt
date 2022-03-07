@@ -157,6 +157,11 @@ func (qa qytApp) Run(repo *git.Repository) func() {
 	}
 }
 
+const (
+	FileViewNameResult = "Result"
+	FileViewNameDiff   = "Diff"
+)
+
 func (qa qytApp) loadInitialData(repo *git.Repository, expParser yqlib.ExpressionParser) ([]plumbing.Reference, *regexp.Regexp, *yqlib.ExpressionNode, error) {
 	exp, err := expParser.ParseExpression(qa.queryEntry.Text)
 	if err != nil {
@@ -181,9 +186,12 @@ func (qa qytApp) runQuery(repo *git.Repository, references []plumbing.Reference,
 
 	buf := new(bytes.Buffer)
 	for _, ref := range references {
-		resultView := container.NewAppTabs()
-		bt := container.NewTabItem(ref.Name().Short(), resultView)
-		resultView.SetTabLocation(container.TabLocationLeading)
+		fileTabs := container.NewAppTabs()
+		bt := container.NewTabItem(ref.Name().Short(), fileTabs)
+		fileTabs.OnSelected = func(item *container.TabItem) {
+			qa.selectAllFilesWithPath(item.Text)
+		}
+		fileTabs.SetTabLocation(container.TabLocationLeading)
 		qa.branchTabs.Append(bt)
 
 		var obj object.Object
@@ -247,11 +255,14 @@ func (qa qytApp) runQuery(repo *git.Repository, references []plumbing.Reference,
 			box.Layout.Layout(box.Objects, fyne.NewSize(300, 400))
 
 			fileViews := container.NewAppTabs(
-				container.NewTabItem("Result", box),
-				container.NewTabItem("Diff", rt),
+				container.NewTabItem(FileViewNameResult, box),
+				container.NewTabItem(FileViewNameDiff, rt),
 			)
+			fileViews.OnSelected = func(item *container.TabItem) {
+				qa.selectAllFileViewsWithName(item.Text)
+			}
 			fileViews.SetTabLocation(container.TabLocationBottom)
-			resultView.Append(container.NewTabItem(file.Name, fileViews))
+			fileTabs.Append(container.NewTabItem(file.Name, fileViews))
 			return nil
 		})
 		if count == 0 && err != nil {
@@ -269,18 +280,62 @@ func (qa qytApp) triggerCopyToClipboard() {
 }
 
 func (qa qytApp) copyToClipboard() {
+	qa.window.Clipboard().SetContent(qa.selectedFileContents())
+}
+
+func (qa qytApp) selectedFileContents() string {
+	fileViews, _, ok := qa.selectedFileViews()
+	if !ok {
+		panic("failed to get selected files")
+	}
+	if len(fileViews.Items) == 0 {
+		return ""
+	}
+	cont, ok := fileViews.Items[0].Content.(*fyne.Container)
+	if !ok || len(cont.Objects) <= 1 {
+		panic("failed to get result view")
+	}
+	rt, ok := cont.Objects[1].(*widget.RichText)
+	if !ok {
+		panic("failed to get selected files")
+	}
+	return rt.String()
+}
+
+func (qa qytApp) selectedFileViews() (*container.AppTabs, string, bool) {
 	branchTab := qa.branchTabs.Selected()
-	appTabs, ok := branchTab.Content.(*container.AppTabs)
+	fileTabs, ok := branchTab.Content.(*container.AppTabs)
 	if !ok {
-		return
+		panic("failed to get selected branch")
 	}
-	fileWidgetContainer, ok := appTabs.Selected().Content.(*fyne.Container)
-	if !ok || len(fileWidgetContainer.Objects) <= 1 {
-		return
+	ft := fileTabs.Selected()
+	tabs, ok := ft.Content.(*container.AppTabs)
+	return tabs, ft.Text, ok
+}
+
+func (qa qytApp) selectAllFilesWithPath(s string) {
+	for _, branchTab := range qa.branchTabs.Items {
+		fileTabs := branchTab.Content.(*container.AppTabs)
+		for i, fileTab := range fileTabs.Items {
+			if fileTab.Text == s {
+				fileTabs.SelectIndex(i)
+				break
+			}
+		}
 	}
-	rt, ok := fileWidgetContainer.Objects[1].(*widget.RichText)
-	if !ok {
-		return
+}
+
+func (qa qytApp) selectAllFileViewsWithName(s string) {
+	for _, branchTab := range qa.branchTabs.Items {
+		fileTabs := branchTab.Content.(*container.AppTabs)
+		for _, fileTab := range fileTabs.Items {
+			fileViews := fileTab.Content.(*container.AppTabs)
+			for i, fileView := range fileViews.Items {
+				if fileView.Text == s {
+					fileViews.SelectIndex(i)
+					break
+				}
+			}
+		}
 	}
-	qa.window.Clipboard().SetContent(rt.String())
 }
