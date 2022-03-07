@@ -49,9 +49,6 @@ func main() {
 
 	qa := initApp(qytConfig, mainWindow, repo)
 	defer qa.Close()
-	qa.branchEntry.SetText(qytConfig.BranchFilter)
-	qa.pathEntry.SetText(qytConfig.FileNameFilter)
-	qa.queryEntry.SetText(qytConfig.Query)
 	go qa.Run()
 	mainWindow.SetContent(qa.view)
 	mainWindow.ShowAndRun()
@@ -110,7 +107,9 @@ func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Reposit
 		_, err := qa.expParser.ParseExpression(s)
 		return err
 	}
-
+	qa.branchEntry.SetText(qa.config.BranchFilter)
+	qa.pathEntry.SetText(qa.config.FileNameFilter)
+	qa.queryEntry.SetText(qa.config.Query)
 	qa.form.Append("YAML Query", qa.queryEntry)
 	qa.form.Append("Branch RegExp", qa.branchEntry)
 	qa.form.Append("File RegExp", qa.pathEntry)
@@ -121,9 +120,9 @@ func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Reposit
 	handle := func(c chan string) func(string) {
 		return func(s string) { c <- s }
 	}
-	qa.branchEntry.OnSubmitted = handle(qa.branchC)
-	qa.pathEntry.OnSubmitted = handle(qa.pathC)
-	qa.queryEntry.OnSubmitted = handle(qa.queryC)
+	qa.branchEntry.OnChanged = handle(qa.branchC)
+	qa.pathEntry.OnChanged = handle(qa.pathC)
+	qa.queryEntry.OnChanged = handle(qa.queryC)
 
 	return qa
 }
