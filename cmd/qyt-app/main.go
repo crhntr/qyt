@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	_ "embed"
+	"errors"
 	"fmt"
 	"image/color"
 	"io"
@@ -108,6 +109,9 @@ func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Reposit
 		return err
 	}
 	qa.queryEntry.Validator = func(s string) error {
+		if s == "" {
+			return errors.New("empty query")
+		}
 		_, err := qa.expParser.ParseExpression(s)
 		return err
 	}
@@ -245,7 +249,6 @@ func (qa qytApp) openCommitDialog(con qyt.Configuration) (commitTemplate, branch
 		submitted = s
 	}, qa.window)
 	<-c
-	log.Println(commitTemplate, branchPrefix, newBranches, submitted)
 	return
 }
 
