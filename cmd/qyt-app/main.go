@@ -163,7 +163,7 @@ func (qa qytApp) Close() {
 }
 
 func (qa qytApp) Run() func() {
-	branchFilter, fileFilter, exp, initialErr := qa.loadInitialData(qa.repo, qa.expParser)
+	branchFilter, fileFilter, exp, initialErr := qa.loadInitialData()
 	if initialErr != nil {
 		qa.errMessage.SetText(initialErr.Error())
 		qa.errMessage.Show()
@@ -258,8 +258,8 @@ const (
 	FileViewNameDiff   = "Diff"
 )
 
-func (qa qytApp) loadInitialData(repo *git.Repository, expParser yqlib.ExpressionParser) (*regexp.Regexp, *regexp.Regexp, *yqlib.ExpressionNode, error) {
-	exp, err := expParser.ParseExpression(qa.queryEntry.Text)
+func (qa qytApp) loadInitialData() (*regexp.Regexp, *regexp.Regexp, *yqlib.ExpressionNode, error) {
+	exp, err := qa.expParser.ParseExpression(qa.queryEntry.Text)
 	if err != nil {
 		return nil, nil, nil, err
 	}
