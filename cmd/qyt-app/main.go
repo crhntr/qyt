@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"image/color"
 	"io"
 	"log"
 	"os"
@@ -39,6 +40,9 @@ func main() {
 	}
 
 	myApp := app.New()
+	myApp.Settings().SetTheme(qytTheme{
+		Theme: theme.DefaultTheme(),
+	})
 	mainWindow := myApp.NewWindow("qyt = yq * git")
 	mainWindow.Resize(fyne.NewSize(800, 600))
 
@@ -330,7 +334,7 @@ func (qa qytApp) runQuery(repo *git.Repository, branchFilter, fileFilter *regexp
 				case diffmatchpatch.DiffDelete:
 					style.ColorName = theme.ColorNameError
 				case diffmatchpatch.DiffInsert:
-					style.ColorName = theme.ColorNamePrimary
+					style.ColorName = InsertColor
 				case diffmatchpatch.DiffEqual:
 					style.ColorName = theme.ColorNameForeground
 				}
@@ -480,4 +484,17 @@ func getSignature(repo *git.Repository, now time.Time) (object.Signature, error)
 		Email: conf.User.Email,
 		When:  now,
 	}, nil
+}
+
+type qytTheme struct {
+	fyne.Theme
+}
+
+const InsertColor = "Insert"
+
+func (qt qytTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	if name == InsertColor {
+		return color.NRGBA{G: 255, A: 255}
+	}
+	return qt.Theme.Color(name, variant)
 }
