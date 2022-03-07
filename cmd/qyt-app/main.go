@@ -279,6 +279,11 @@ func (qa qytApp) runQuery(repo *git.Repository, branchFilter, fileFilter *regexp
 	qa.errMessage.SetText("")
 	qa.branchTabs.SetItems(nil)
 
+	qa.window.SetFixedSize(true)
+	defer func() {
+		qa.window.SetFixedSize(false)
+	}()
+
 	references, err := qyt.MatchingBranches(branchFilter.String(), qa.repo, false)
 	if err != nil {
 		qa.errMessage.SetText(err.Error())
