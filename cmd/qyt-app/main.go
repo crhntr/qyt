@@ -219,6 +219,7 @@ func (qa qytApp) Run() func() {
 func (qa qytApp) openCommitDialog(con qyt.Configuration) (commitTemplate, branchPrefix string, newBranches bool, submitted bool) {
 	commitTemplateEntree := widget.NewEntry()
 	commitTemplateEntree.SetText(con.CommitTemplate)
+	commitTemplateEntree.MultiLine = true
 
 	branchPrefixEntree := widget.NewEntry()
 	branchPrefixEntree.SetText(con.NewBranchPrefix)
