@@ -1,19 +1,14 @@
 package main
 
 import (
-	"bufio"
 	_ "embed"
-	"flag"
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"time"
 
-	markdown "github.com/MichaelMure/go-term-markdown"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
-	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"gopkg.in/op/go-logging.v1"
 
@@ -25,67 +20,30 @@ func init() {
 	logging.SetBackend(backend)
 }
 
-//go:embed README.md
-var readme string
-
 func main() {
-	var (
-		repoPath,
-		branchesPattern,
-		branchPrefix,
-		commitMessage string
-		allowOverridingExistingBranches, verbose, outputToJSON bool
-		// noConfirm bool
-	)
+	allowOverridingExistingBranches := false
 
-	flags := &flag.FlagSet{}
-	flags.StringVar(&branchesPattern, "b", qyt.DefaultBranchRegex().String(), "regular expression for branches")
-	flags.StringVar(&repoPath, "r", ".", "path to local git repository")
-
-	flags.StringVar(&branchPrefix, "p", "", "prefix for created branches (recommended when -m is set)")
-	flags.StringVar(&commitMessage, "m", "", "commit message template (CommitMessageData is passed when executing the template)")
-
-	flags.BoolVar(&allowOverridingExistingBranches, "c", false, "commit changes onto existing branches")
-	flags.BoolVar(&verbose, "v", false, "verbose logging")
-
-	flags.BoolVar(&outputToJSON, "json", false, "format output as json")
-	// flags.BoolVar(&noConfirm, "no-confirm", false, "skip commit confirmation")
-
-	flags.Usage = func() {
-		fmt.Print(string(markdown.Render(readme+"\n## Options", 80, 0)))
-		flags.PrintDefaults()
-	}
-
-	err := flags.Parse(os.Args[1:])
+	qytConfig, usage, err := qyt.LoadConfiguration()
 	if err != nil {
-		fmt.Println("could not parse flags", err)
-		flags.Usage()
+		usage()
 		os.Exit(1)
 	}
 
-	if flags.NArg() < 2 {
-		fmt.Println("missing required argument(s)")
-		flags.Usage()
-		os.Exit(1)
-	}
-
-	yqExpressionString := flags.Arg(0)
-	filePattern := flags.Arg(1)
-
-	repo, err := git.PlainOpen(repoPath)
+	repo, err := git.PlainOpen(qytConfig.GitRepositoryPath)
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "failed to open repository", err)
+		usage()
 		os.Exit(1)
 	}
 
-	if commitMessage != "" {
+	if qytConfig.CommitTemplate != "" {
 		author, getSignatureErr := getSignature(repo, time.Now())
 		if getSignatureErr != nil {
 			_, _ = fmt.Fprintln(os.Stderr, "failed to open repository", getSignatureErr)
 			os.Exit(1)
 		}
 
-		err = qyt.Apply(repo, yqExpressionString, branchesPattern, filePattern, commitMessage, branchPrefix, author, verbose, allowOverridingExistingBranches)
+		err = qyt.Apply(repo, qytConfig.Query, qytConfig.BranchFilter, qytConfig.FileNameFilter, qytConfig.CommitTemplate, qytConfig.NewBranchPrefix, author, false, allowOverridingExistingBranches)
 		if err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "apply error: %s\n", err.Error())
 			os.Exit(1)
@@ -93,35 +51,11 @@ func main() {
 		return
 	}
 
-	err = qyt.Query(os.Stdout, repo, yqExpressionString, branchesPattern, filePattern, verbose, outputToJSON)
+	err = qyt.Query(os.Stdout, repo, qytConfig.Query, qytConfig.BranchFilter, qytConfig.FileNameFilter, false, false)
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "query error: %s\n", err.Error())
 		os.Exit(1)
 	}
-}
-
-func logCommitMessage(branch plumbing.Reference, obj plumbing.MemoryObject, prefix string) error {
-	var commit object.Commit
-	commitDecodeErr := commit.Decode(&obj)
-	if commitDecodeErr != nil {
-		return commitDecodeErr
-	}
-
-	fmt.Printf(prefix+"Commiting changes to %s\n", branch.Name().Short())
-	r := bufio.NewReader(strings.NewReader(commit.String()))
-	for {
-		line, readErr := r.ReadString('\n')
-		if readErr != nil {
-			break
-		}
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		fmt.Printf(prefix+"\t%s\n", line)
-	}
-
-	return nil
 }
 
 func getSignature(repo *git.Repository, now time.Time) (object.Signature, error) {

@@ -22,47 +22,21 @@ import (
 	"github.com/crhntr/qyt"
 )
 
-const (
-	defaultFieldValueBranchRegex  = ".*"
-	defaultFieldValueYQExpression = "."
-	defaultFieldValueFileFilter   = `(.+)\.ya?ml`
-)
-
-func defaultFieldBranchRegex() string {
-	e := os.Getenv("QYT_BRANCH_REGEX")
-	if e != "" {
-		return e
-	}
-	return defaultFieldValueBranchRegex
-}
-func defaultFieldFileFilter() string {
-	e := os.Getenv("QYT_FILE_REGEX")
-	if e != "" {
-		return e
-	}
-	return defaultFieldValueFileFilter
-}
-func defaultFieldYQExpression() string {
-	e := os.Getenv("QYT_YQ_EXPRESSION")
-	if e != "" {
-		return e
-	}
-	return defaultFieldValueYQExpression
-}
-
 func main() {
 	backend := logging.NewLogBackend(io.Discard, "", 0)
 	logging.SetBackend(backend)
+
+	qytConfig, usage, err := qyt.LoadConfiguration()
+	if err != nil {
+		usage()
+		os.Exit(1)
+	}
 
 	myApp := app.New()
 	mainWindow := myApp.NewWindow("qyt = yq * git")
 	mainWindow.Resize(fyne.NewSize(800, 600))
 
-	repoPath := "."
-	if len(os.Args) > 1 {
-		repoPath = os.Args[1]
-	}
-	repo, err := git.PlainOpenWithOptions(repoPath, &git.PlainOpenOptions{
+	repo, err := git.PlainOpenWithOptions(qytConfig.GitRepositoryPath, &git.PlainOpenOptions{
 		DetectDotGit: true,
 	})
 	if err != nil {
@@ -72,6 +46,9 @@ func main() {
 
 	qa := initQYTApp(mainWindow)
 	defer qa.Close()
+	qa.branchEntry.SetText(qytConfig.BranchFilter)
+	qa.pathEntry.SetText(qytConfig.FileNameFilter)
+	qa.queryEntry.SetText(qytConfig.Query)
 	go qa.Run(repo)
 	mainWindow.SetContent(qa.view)
 	mainWindow.ShowAndRun()
@@ -107,9 +84,6 @@ func initQYTApp(mainWindow fyne.Window) *qytApp {
 	}
 	qa.view = container.NewVSplit(container.NewVBox(qa.form, qa.errMessage), qa.branchTabs)
 
-	qa.branchEntry.SetText(defaultFieldBranchRegex())
-	qa.pathEntry.SetText(defaultFieldFileFilter())
-	qa.queryEntry.SetText(defaultFieldYQExpression())
 	qa.form.Append("YAML Query", qa.queryEntry)
 	qa.form.Append("Branch RegExp", qa.branchEntry)
 	qa.form.Append("File RegExp", qa.pathEntry)
@@ -192,15 +166,15 @@ eventLoop:
 }
 
 func (qa qytApp) loadInitialData(repo *git.Repository, expParser yqlib.ExpressionParser) ([]plumbing.Reference, *yqlib.ExpressionNode, *regexp.Regexp, error) {
-	exp, err := expParser.ParseExpression(defaultFieldYQExpression())
+	exp, err := expParser.ParseExpression(qa.queryEntry.Text)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	fileFilter, err := regexp.Compile(defaultFieldFileFilter())
+	fileFilter, err := regexp.Compile(qa.pathEntry.Text)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	refs, err := qyt.MatchingBranches(defaultFieldBranchRegex(), repo, false)
+	refs, err := qyt.MatchingBranches(qa.branchEntry.Text, repo, false)
 	if err != nil {
 		return nil, exp, fileFilter, err
 	}
