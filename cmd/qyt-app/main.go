@@ -44,7 +44,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	qa := initQYTApp(mainWindow)
+	qa := initApp(mainWindow)
 	defer qa.Close()
 	qa.branchEntry.SetText(qytConfig.BranchFilter)
 	qa.pathEntry.SetText(qytConfig.FileNameFilter)
@@ -72,7 +72,7 @@ type qytApp struct {
 	copyRequestC chan struct{}
 }
 
-func initQYTApp(mainWindow fyne.Window) *qytApp {
+func initApp(mainWindow fyne.Window) *qytApp {
 	qa := &qytApp{
 		window:      mainWindow,
 		form:        widget.NewForm(),
@@ -97,6 +97,7 @@ func initQYTApp(mainWindow fyne.Window) *qytApp {
 	qa.branchEntry.OnSubmitted = handle(qa.branchC)
 	qa.pathEntry.OnSubmitted = handle(qa.pathC)
 	qa.queryEntry.OnSubmitted = handle(qa.queryC)
+
 	return qa
 }
 
@@ -112,21 +113,12 @@ func (qa qytApp) Close() {
 func (qa qytApp) Run(repo *git.Repository) func() {
 	expParser := yqlib.NewExpressionParser()
 
-	refs, exp, fileFilter, initialErr := qa.loadInitialData(repo, expParser)
+	refs, fileFilter, exp, initialErr := qa.loadInitialData(repo, expParser)
 	if initialErr != nil {
 		qa.errMessage.SetText(initialErr.Error())
 		qa.errMessage.Show()
 	}
-
-	updateResult := func() {
-		qa.errMessage.Hide()
-		qa.errMessage.SetText("")
-		err := qa.runQuery(refs, repo, fileFilter, exp)
-		if err != nil {
-			qa.errMessage.SetText(err.Error())
-			qa.errMessage.Show()
-		}
-	}
+	qa.runQuery(repo, refs, fileFilter, exp)
 
 	for {
 		select {
@@ -140,7 +132,7 @@ func (qa qytApp) Run(repo *git.Repository) func() {
 				break
 			}
 			refs = rs
-			updateResult()
+			qa.runQuery(repo, refs, fileFilter, exp)
 		case p := <-qa.pathC:
 			ff, err := regexp.Compile(p)
 			if err != nil {
@@ -149,7 +141,7 @@ func (qa qytApp) Run(repo *git.Repository) func() {
 				break
 			}
 			fileFilter = ff
-			updateResult()
+			qa.runQuery(repo, refs, fileFilter, exp)
 		case q := <-qa.queryC:
 			ex, err := expParser.ParseExpression(q)
 			if err != nil {
@@ -158,12 +150,12 @@ func (qa qytApp) Run(repo *git.Repository) func() {
 				break
 			}
 			exp = ex
-			updateResult()
+			qa.runQuery(repo, refs, fileFilter, exp)
 		}
 	}
 }
 
-func (qa qytApp) loadInitialData(repo *git.Repository, expParser yqlib.ExpressionParser) ([]plumbing.Reference, *yqlib.ExpressionNode, *regexp.Regexp, error) {
+func (qa qytApp) loadInitialData(repo *git.Repository, expParser yqlib.ExpressionParser) ([]plumbing.Reference, *regexp.Regexp, *yqlib.ExpressionNode, error) {
 	exp, err := expParser.ParseExpression(qa.queryEntry.Text)
 	if err != nil {
 		return nil, nil, nil, err
@@ -174,17 +166,17 @@ func (qa qytApp) loadInitialData(repo *git.Repository, expParser yqlib.Expressio
 	}
 	refs, err := qyt.MatchingBranches(qa.branchEntry.Text, repo, false)
 	if err != nil {
-		return nil, exp, fileFilter, err
+		return nil, fileFilter, exp, err
 	}
-	err = qa.runQuery(refs, repo, fileFilter, exp)
-	if err != nil {
-		return refs, exp, fileFilter, err
-	}
-	return refs, exp, fileFilter, nil
+	qa.runQuery(repo, refs, fileFilter, exp)
+	return refs, fileFilter, exp, nil
 }
 
-func (qa qytApp) runQuery(references []plumbing.Reference, repo *git.Repository, fileNameMatcher *regexp.Regexp, queryExp *yqlib.ExpressionNode) error {
+func (qa qytApp) runQuery(repo *git.Repository, references []plumbing.Reference, fileNameMatcher *regexp.Regexp, queryExp *yqlib.ExpressionNode) {
+	qa.errMessage.Hide()
+	qa.errMessage.SetText("")
 	qa.branchTabs.SetItems(nil)
+
 	buf := new(bytes.Buffer)
 	for _, ref := range references {
 		resultView := container.NewAppTabs()
@@ -195,7 +187,9 @@ func (qa qytApp) runQuery(references []plumbing.Reference, repo *git.Repository,
 		var obj object.Object
 		obj, err := repo.Object(plumbing.CommitObject, ref.Hash())
 		if err != nil {
-			return err
+			qa.errMessage.SetText(err.Error())
+			qa.errMessage.Show()
+			return
 		}
 		count := 0
 		err = qyt.HandleMatchingFiles(obj, fileNameMatcher, func(file *object.File) error {
@@ -218,14 +212,14 @@ func (qa qytApp) runQuery(references []plumbing.Reference, repo *git.Repository,
 			resultView.Append(container.NewTabItem(file.Name, box))
 			return nil
 		})
-		if count == 0 {
-			return fmt.Errorf("no matching files for ref %s", ref.Name())
+		if count == 0 && err != nil {
+			err = fmt.Errorf("no matching files for ref %s", ref.Name())
 		}
 		if err != nil {
-			return err
+			qa.errMessage.SetText(err.Error())
+			qa.errMessage.Show()
 		}
 	}
-	return nil
 }
 
 func (qa qytApp) triggerCopyToClipboard() {
