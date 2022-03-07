@@ -45,7 +45,7 @@ func main() {
 		Theme: theme.DefaultTheme(),
 	})
 	mainWindow := myApp.NewWindow("qyt = yq * git")
-	mainWindow.Resize(fyne.NewSize(800, 600))
+	mainWindow.Resize(fyne.NewSize(1200, 900))
 
 	repo, err := loadRepo(qytConfig)
 	if err != nil {
@@ -128,9 +128,9 @@ func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Reposit
 	handle := func(c chan string) func(string) {
 		return func(s string) { c <- s }
 	}
-	qa.branchEntry.OnChanged = handle(qa.branchC)
-	qa.pathEntry.OnChanged = handle(qa.pathC)
-	qa.queryEntry.OnChanged = handle(qa.queryC)
+	qa.branchEntry.OnSubmitted = handle(qa.branchC)
+	qa.pathEntry.OnSubmitted = handle(qa.pathC)
+	qa.queryEntry.OnSubmitted = handle(qa.queryC)
 
 	return qa
 }
@@ -168,6 +168,7 @@ func (qa qytApp) Run() func() {
 		qa.errMessage.SetText(initialErr.Error())
 		qa.errMessage.Show()
 	}
+
 	qa.runQuery(qa.repo, branchFilter, fileFilter, exp)
 
 	defer log.Println("done running")
@@ -270,7 +271,6 @@ func (qa qytApp) loadInitialData(repo *git.Repository, expParser yqlib.Expressio
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	qa.runQuery(repo, branchFilter, fileFilter, exp)
 	return branchFilter, fileFilter, exp, nil
 }
 
@@ -292,6 +292,7 @@ func (qa qytApp) runQuery(repo *git.Repository, branchFilter, fileFilter *regexp
 	}
 
 	buf := new(bytes.Buffer)
+	count := 0
 	for _, ref := range references {
 		fileTabs := container.NewAppTabs()
 		bt := container.NewTabItem(ref.Name().Short(), fileTabs)
@@ -308,7 +309,6 @@ func (qa qytApp) runQuery(repo *git.Repository, branchFilter, fileFilter *regexp
 			qa.errMessage.Show()
 			return
 		}
-		count := 0
 		err = qyt.HandleMatchingFiles(obj, fileFilter, func(file *object.File) (err error) {
 			count++
 			rc, err := file.Reader()
@@ -362,8 +362,8 @@ func (qa qytApp) runQuery(repo *git.Repository, branchFilter, fileFilter *regexp
 			box.Layout.Layout(box.Objects, fyne.NewSize(300, 400))
 
 			fileViews := container.NewAppTabs(
-				container.NewTabItem(FileViewNameResult, box),
-				container.NewTabItem(FileViewNameDiff, rt),
+				container.NewTabItem(FileViewNameResult, container.NewScroll(box)),
+				container.NewTabItem(FileViewNameDiff, container.NewScroll(rt)),
 			)
 			fileViews.OnSelected = func(item *container.TabItem) {
 				qa.selectAllFileViewsWithName(item.Text)
@@ -372,13 +372,14 @@ func (qa qytApp) runQuery(repo *git.Repository, branchFilter, fileFilter *regexp
 			fileTabs.Append(container.NewTabItem(file.Name, fileViews))
 			return nil
 		})
-		if count == 0 && err != nil {
-			err = fmt.Errorf("no matching files for ref %s", ref.Name())
-		}
 		if err != nil {
 			qa.errMessage.SetText(err.Error())
 			qa.errMessage.Show()
 		}
+	}
+	if count == 0 && err == nil {
+		qa.errMessage.SetText(fmt.Sprintf("no matching files"))
+		qa.errMessage.Show()
 	}
 }
 
@@ -406,7 +407,7 @@ func (qa qytApp) selectedFileContents() string {
 	if !ok || len(cont.Objects) <= 1 {
 		panic("failed to get result view")
 	}
-	rt, ok := cont.Objects[1].(*widget.RichText)
+	rt, ok := cont.Objects[1].(*container.Scroll).Content.(*widget.RichText)
 	if !ok {
 		panic("failed to get selected files")
 	}
