@@ -16,7 +16,6 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 	"github.com/go-git/go-git/v5"
@@ -65,10 +64,14 @@ type qytApp struct {
 	repo      *git.Repository
 	expParser yqlib.ExpressionParser
 
-	window       fyne.Window
-	view         *container.Split
-	form         *widget.Form
-	commitButton *widget.Button
+	window fyne.Window
+	view   *container.Split
+	form   *widget.Form
+	newBranchesCheckbox,
+	commitResultCheckbox *widget.Check
+
+	commitTemplateEntry,
+	branchPrefixEntry,
 	branchEntry,
 	pathEntry,
 	queryEntry *widget.Entry
@@ -76,7 +79,7 @@ type qytApp struct {
 
 	branchTabs *container.AppTabs
 
-	copyRequestC, commitC, queryC chan struct{}
+	copyRequestC, queryC chan struct{}
 }
 
 func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Repository) *qytApp {
@@ -85,19 +88,47 @@ func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Reposit
 		config:    config,
 		expParser: yqlib.NewExpressionParser(),
 
-		window:      mainWindow,
-		form:        widget.NewForm(),
-		branchEntry: widget.NewEntry(),
-		pathEntry:   widget.NewEntry(),
-		queryEntry:  widget.NewEntry(),
-		branchTabs:  container.NewAppTabs(),
-		errMessage:  widget.NewLabelWithStyle("", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+		window:              mainWindow,
+		form:                widget.NewForm(),
+		branchEntry:         widget.NewEntry(),
+		pathEntry:           widget.NewEntry(),
+		queryEntry:          widget.NewEntry(),
+		commitTemplateEntry: widget.NewEntry(),
+		branchPrefixEntry:   widget.NewEntry(),
+		branchTabs:          container.NewAppTabs(),
+		errMessage:          widget.NewLabelWithStyle("", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 	}
-	qa.commitC = make(chan struct{})
-	qa.commitButton = widget.NewButton("Commit", qa.triggerCommit)
-	hitEnterTip := widget.NewLabel("Hit Enter to Run Query")
-	hitEnterTip.Hide()
-	qa.view = container.NewVSplit(container.NewVBox(qa.form, hitEnterTip, qa.commitButton, qa.errMessage), qa.branchTabs)
+
+	qa.branchPrefixEntry.Disable()
+	qa.newBranchesCheckbox = widget.NewCheck("", func(checked bool) {
+		if checked {
+			qa.branchPrefixEntry.Enable()
+		} else {
+			qa.branchPrefixEntry.Disable()
+		}
+		qa.form.Refresh()
+	})
+
+	qa.commitTemplateEntry.Disable()
+	qa.branchPrefixEntry.Disable()
+	qa.newBranchesCheckbox.Disable()
+	qa.commitResultCheckbox = widget.NewCheck("Commit Result", func(checked bool) {
+		if checked {
+			qa.commitTemplateEntry.Enable()
+			qa.newBranchesCheckbox.Enable()
+		} else {
+			qa.commitTemplateEntry.Disable()
+			qa.branchPrefixEntry.Disable()
+			qa.newBranchesCheckbox.Disable()
+		}
+		qa.form.Refresh()
+	})
+
+	qa.commitTemplateEntry.SetText(qa.config.CommitTemplate)
+	qa.commitTemplateEntry.MultiLine = true
+	qa.branchPrefixEntry.SetText(qa.config.NewBranchPrefix)
+
+	qa.view = container.NewVSplit(container.NewVBox(qa.form, qa.errMessage), qa.branchTabs)
 
 	qa.branchEntry.Validator = func(s string) error {
 		_, err := regexp.Compile(s)
@@ -114,35 +145,24 @@ func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Reposit
 		_, err := qa.expParser.ParseExpression(s)
 		return err
 	}
+	qa.queryEntry.MultiLine = true
 	qa.branchEntry.SetText(qa.config.BranchFilter)
-	qa.branchEntry.OnSubmitted = func(string) {
-		qa.form.OnSubmit()
-	}
 	qa.pathEntry.SetText(qa.config.FileNameFilter)
-	qa.pathEntry.OnSubmitted = func(string) {
-		qa.form.OnSubmit()
-	}
 	qa.queryEntry.SetText(qa.config.Query)
-	qa.queryEntry.OnSubmitted = func(string) {
-		qa.form.OnSubmit()
-	}
-	qa.branchEntry.OnChanged = func(string) {
-		hitEnterTip.Show()
-	}
-	qa.pathEntry.OnChanged = func(string) {
-		hitEnterTip.Show()
-	}
-	qa.queryEntry.OnChanged = func(string) {
-		hitEnterTip.Show()
+	qa.copyRequestC = make(chan struct{})
+	qa.queryC = make(chan struct{})
+
+	qa.form.SubmitText = "Run Query"
+	qa.form.OnSubmit = func() {
+		qa.queryC <- struct{}{}
 	}
 	qa.form.Append("YAML Query", qa.queryEntry)
 	qa.form.Append("Branch RegExp", qa.branchEntry)
 	qa.form.Append("File RegExp", qa.pathEntry)
-	qa.copyRequestC = make(chan struct{})
-	qa.queryC = make(chan struct{})
-	qa.form.OnSubmit = func() {
-		qa.queryC <- struct{}{}
-	}
+	qa.form.Append("Commit Result", qa.commitResultCheckbox)
+	qa.form.Append("Message", qa.commitTemplateEntry)
+	qa.form.Append("New Branches", qa.newBranchesCheckbox)
+	qa.form.Append("Branch Prefix", qa.branchPrefixEntry)
 
 	return qa
 }
@@ -154,24 +174,38 @@ func loadRepo(c qyt.Configuration) (*git.Repository, error) {
 }
 
 func (qa qytApp) disableInput() {
+	qa.form.Disable()
+
 	qa.branchEntry.Disable()
 	qa.pathEntry.Disable()
 	qa.queryEntry.Disable()
-	qa.commitButton.Disable()
+	qa.commitTemplateEntry.Disable()
+	qa.branchPrefixEntry.Disable()
+
+	qa.newBranchesCheckbox.Disable()
+	qa.commitResultCheckbox.Disable()
 }
 
 func (qa qytApp) enableInput() {
 	qa.branchEntry.Enable()
 	qa.pathEntry.Enable()
 	qa.queryEntry.Enable()
-	qa.commitButton.Enable()
+
+	if qa.commitResultCheckbox.Checked {
+		qa.commitTemplateEntry.Enable()
+		qa.branchPrefixEntry.Enable()
+
+		qa.newBranchesCheckbox.Enable()
+	}
+	qa.commitResultCheckbox.Enable()
+
+	qa.form.Enable()
 }
 
 func (qa qytApp) Close() {
 	qa.disableInput()
 	close(qa.queryC)
 	close(qa.copyRequestC)
-	close(qa.commitC)
 }
 
 func (qa qytApp) Run() func() {
@@ -182,19 +216,6 @@ func (qa qytApp) Run() func() {
 	for {
 		qa.enableInput()
 		select {
-		case <-qa.commitC:
-			qa.disableInput()
-			commitTemplate, branchPrefix, newBranches, submitted := qa.openCommitDialog(qa.config)
-			if !submitted {
-				break
-			}
-			qa.commit(commitTemplate, branchPrefix, !newBranches)
-			var err error
-			qa.repo, err = loadRepo(qa.config)
-			if err != nil {
-				log.Fatal(err)
-			}
-			qa.runQuery(qa.repo)
 		case <-qa.copyRequestC:
 			qa.copyToClipboard()
 		case <-qa.queryC:
@@ -202,34 +223,6 @@ func (qa qytApp) Run() func() {
 			qa.runQuery(qa.repo)
 		}
 	}
-}
-
-func (qa qytApp) openCommitDialog(con qyt.Configuration) (commitTemplate, branchPrefix string, newBranches bool, submitted bool) {
-	commitTemplateEntree := widget.NewEntry()
-	commitTemplateEntree.SetText(con.CommitTemplate)
-	commitTemplateEntree.MultiLine = true
-
-	branchPrefixEntree := widget.NewEntry()
-	branchPrefixEntree.SetText(con.NewBranchPrefix)
-
-	newBranchesCheckbox := widget.NewCheck("", func(checked bool) {})
-
-	formItems := []*widget.FormItem{
-		widget.NewFormItem("Message", commitTemplateEntree),
-		widget.NewFormItem("Branch Prefix", branchPrefixEntree),
-		widget.NewFormItem("New Branches", newBranchesCheckbox),
-	}
-
-	c := make(chan struct{})
-	dialog.ShowForm("Commit", "Commit", "Cancel", formItems, func(s bool) {
-		defer close(c)
-		commitTemplate = commitTemplateEntree.Text
-		branchPrefix = branchPrefixEntree.Text
-		newBranches = newBranchesCheckbox.Checked
-		submitted = s
-	}, qa.window)
-	<-c
-	return
 }
 
 const (
@@ -259,6 +252,18 @@ func (qa qytApp) runQuery(repo *git.Repository) {
 		qa.errMessage.SetText(err.Error())
 		qa.errMessage.Show()
 		return
+	}
+
+	if qa.commitResultCheckbox.Checked {
+		commitTemplate := qa.commitTemplateEntry.Text
+		branchPrefix := qa.branchPrefixEntry.Text
+		newBranches := qa.newBranchesCheckbox.Checked
+		qa.commit(commitTemplate, branchPrefix, !newBranches)
+		var err error
+		qa.repo, err = loadRepo(qa.config)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	qa.errMessage.Hide()
@@ -366,10 +371,6 @@ func (qa qytApp) runQuery(repo *git.Repository) {
 
 func (qa qytApp) triggerCopyToClipboard() {
 	qa.copyRequestC <- struct{}{}
-}
-
-func (qa qytApp) triggerCommit() {
-	qa.commitC <- struct{}{}
 }
 
 func (qa qytApp) copyToClipboard() {
