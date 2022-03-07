@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -17,6 +18,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
+	"github.com/sergi/go-diff/diffmatchpatch"
 	"gopkg.in/op/go-logging.v1"
 
 	"github.com/crhntr/qyt"
@@ -192,24 +194,64 @@ func (qa qytApp) runQuery(repo *git.Repository, references []plumbing.Reference,
 			return
 		}
 		count := 0
-		err = qyt.HandleMatchingFiles(obj, fileNameMatcher, func(file *object.File) error {
+		err = qyt.HandleMatchingFiles(obj, fileNameMatcher, func(file *object.File) (err error) {
 			count++
-			rc, _ := file.Reader()
-			defer func() {
-				_ = rc.Close()
-			}()
-			buf.Reset()
-			err := qyt.ApplyExpression(buf, rc, queryExp, file.Name, qyt.NewScope(ref, file), false)
+			rc, err := file.Reader()
 			if err != nil {
 				return err
 			}
+			defer func() {
+				err = rc.Close()
+			}()
+			input, err := io.ReadAll(rc)
+			if err != nil {
+				return err
+			}
+			buf.Reset()
+			err = qyt.ApplyExpression(buf, bytes.NewReader(input), queryExp, file.Name, qyt.NewScope(ref, file), false)
+			if err != nil {
+				return err
+			}
+
+			dmp := diffmatchpatch.New()
+			diffs := dmp.DiffMain(string(input), buf.String(), true)
+
+			diffSegments := make([]widget.RichTextSegment, 0, len(diffs))
+			for _, d := range diffs {
+				style := widget.RichTextStyle{
+					Inline:    false,
+					SizeName:  theme.SizeNameText,
+					TextStyle: fyne.TextStyle{Monospace: true},
+				}
+				switch d.Type {
+				case diffmatchpatch.DiffDelete:
+					style.ColorName = theme.ColorNameError
+				case diffmatchpatch.DiffInsert:
+					style.ColorName = theme.ColorNamePrimary
+				case diffmatchpatch.DiffEqual:
+					style.ColorName = theme.ColorNameForeground
+				}
+				style.Inline = !strings.HasSuffix(d.Text, "\n")
+				diffSegments = append(diffSegments, &widget.TextSegment{
+					Text:  strings.TrimSuffix(d.Text, "\n"),
+					Style: style,
+				})
+			}
+			rt := widget.NewRichText(diffSegments...)
+
 			toolbar := widget.NewToolbar()
 			toolbar.Append(widget.NewToolbarAction(theme.ContentCopyIcon(), qa.triggerCopyToClipboard))
 			contents := widget.NewRichTextWithText(buf.String())
 			contents.Wrapping = fyne.TextWrapOff
 			box := container.NewVBox(toolbar, contents)
 			box.Layout.Layout(box.Objects, fyne.NewSize(300, 400))
-			resultView.Append(container.NewTabItem(file.Name, box))
+
+			fileViews := container.NewAppTabs(
+				container.NewTabItem("Result", box),
+				container.NewTabItem("Diff", rt),
+			)
+			fileViews.SetTabLocation(container.TabLocationBottom)
+			resultView.Append(container.NewTabItem(file.Name, fileViews))
 			return nil
 		})
 		if count == 0 && err != nil {
