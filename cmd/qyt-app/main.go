@@ -31,6 +31,7 @@ import (
 
 func main() {
 	backend := logging.NewLogBackend(io.Discard, "", 0)
+	logging.SetLevel(logging.CRITICAL, "github.com/mikefarah/yq/v4")
 	logging.SetBackend(backend)
 
 	qytConfig, usage, err := qyt.LoadConfiguration()
@@ -139,10 +140,16 @@ func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Reposit
 		return err
 	}
 	qa.queryEntry.Validator = func(s string) error {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("recovered from query validation: %s", r)
+			}
+		}()
 		if s == "" {
 			return errors.New("empty query")
 		}
-		_, err := qa.expParser.ParseExpression(s)
+		parser := yqlib.NewExpressionParser()
+		_, err := parser.ParseExpression(s)
 		return err
 	}
 	qa.queryEntry.MultiLine = true
