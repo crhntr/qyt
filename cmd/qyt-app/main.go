@@ -11,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -61,6 +62,8 @@ func main() {
 }
 
 type qytApp struct {
+	sync.Mutex
+
 	config    qyt.Configuration
 	repo      *git.Repository
 	expParser yqlib.ExpressionParser
@@ -80,7 +83,7 @@ type qytApp struct {
 
 	branchTabs *container.AppTabs
 
-	copyRequestC, queryC chan struct{}
+	queryC chan struct{}
 }
 
 func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Repository) *qytApp {
@@ -102,6 +105,9 @@ func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Reposit
 
 	qa.branchPrefixEntry.Disable()
 	qa.newBranchesCheckbox = widget.NewCheck("", func(checked bool) {
+		qa.Lock()
+		defer qa.Unlock()
+
 		if checked {
 			qa.branchPrefixEntry.Enable()
 		} else {
@@ -114,6 +120,9 @@ func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Reposit
 	qa.branchPrefixEntry.Disable()
 	qa.newBranchesCheckbox.Disable()
 	qa.commitResultCheckbox = widget.NewCheck("Commit Result", func(checked bool) {
+		qa.Lock()
+		defer qa.Unlock()
+
 		if checked {
 			qa.commitTemplateEntry.Enable()
 			qa.newBranchesCheckbox.Enable()
@@ -156,7 +165,6 @@ func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Reposit
 	qa.branchEntry.SetText(qa.config.BranchFilter)
 	qa.pathEntry.SetText(qa.config.FileNameFilter)
 	qa.queryEntry.SetText(qa.config.Query)
-	qa.copyRequestC = make(chan struct{})
 	qa.queryC = make(chan struct{})
 
 	qa.form.SubmitText = "Run Query"
@@ -180,7 +188,10 @@ func loadRepo(c qyt.Configuration) (*git.Repository, error) {
 	})
 }
 
-func (qa qytApp) disableInput() {
+func (qa *qytApp) disableInput() {
+	qa.Lock()
+	defer qa.Unlock()
+
 	qa.form.Disable()
 
 	qa.branchEntry.Disable()
@@ -193,7 +204,10 @@ func (qa qytApp) disableInput() {
 	qa.commitResultCheckbox.Disable()
 }
 
-func (qa qytApp) enableInput() {
+func (qa *qytApp) enableInput() {
+	qa.Lock()
+	defer qa.Unlock()
+
 	qa.branchEntry.Enable()
 	qa.pathEntry.Enable()
 	qa.queryEntry.Enable()
@@ -209,13 +223,12 @@ func (qa qytApp) enableInput() {
 	qa.form.Enable()
 }
 
-func (qa qytApp) Close() {
+func (qa *qytApp) Close() {
 	qa.disableInput()
 	close(qa.queryC)
-	close(qa.copyRequestC)
 }
 
-func (qa qytApp) Run() func() {
+func (qa *qytApp) Run() func() {
 	qa.runQuery(qa.repo)
 
 	defer log.Println("done running")
@@ -223,8 +236,6 @@ func (qa qytApp) Run() func() {
 	for {
 		qa.enableInput()
 		select {
-		case <-qa.copyRequestC:
-			qa.copyToClipboard()
 		case <-qa.queryC:
 			qa.disableInput()
 			qa.runQuery(qa.repo)
@@ -237,7 +248,10 @@ const (
 	FileViewNameDiff   = "Diff"
 )
 
-func (qa qytApp) loadFields() (*regexp.Regexp, *regexp.Regexp, *yqlib.ExpressionNode, error) {
+func (qa *qytApp) loadFields() (*regexp.Regexp, *regexp.Regexp, *yqlib.ExpressionNode, error) {
+	qa.Lock()
+	defer qa.Unlock()
+
 	exp, err := qa.expParser.ParseExpression(qa.queryEntry.Text)
 	if err != nil {
 		return nil, nil, nil, err
@@ -253,11 +267,10 @@ func (qa qytApp) loadFields() (*regexp.Regexp, *regexp.Regexp, *yqlib.Expression
 	return branchFilter, fileFilter, exp, nil
 }
 
-func (qa qytApp) runQuery(repo *git.Repository) {
+func (qa *qytApp) runQuery(repo *git.Repository) {
 	branchFilter, fileFilter, queryExp, err := qa.loadFields()
 	if err != nil {
-		qa.errMessage.SetText(err.Error())
-		qa.errMessage.Show()
+		qa.displayError(err)
 		return
 	}
 
@@ -273,33 +286,23 @@ func (qa qytApp) runQuery(repo *git.Repository) {
 		}
 	}
 
-	qa.errMessage.Hide()
-	qa.errMessage.SetText("")
-	qa.branchTabs.SetItems(nil)
+	qa.clearBranchesAndError()
 
 	references, err := qyt.MatchingBranches(branchFilter.String(), qa.repo, false)
 	if err != nil {
-		qa.errMessage.SetText(err.Error())
-		qa.errMessage.Show()
+		qa.displayError(err)
 		return
 	}
 
 	buf := new(bytes.Buffer)
 	count := 0
 	for _, ref := range references {
-		fileTabs := container.NewAppTabs()
-		bt := container.NewTabItem(ref.Name().Short(), fileTabs)
-		fileTabs.OnSelected = func(item *container.TabItem) {
-			qa.selectAllFilesWithPath(item.Text)
-		}
-		fileTabs.SetTabLocation(container.TabLocationLeading)
-		qa.branchTabs.Append(bt)
+		fileTabs := qa.createNewBranchTab(ref)
 
 		var obj object.Object
 		obj, err := repo.Object(plumbing.CommitObject, ref.Hash())
 		if err != nil {
-			qa.errMessage.SetText(err.Error())
-			qa.errMessage.Show()
+			qa.displayError(err)
 			return
 		}
 		err = qyt.HandleMatchingFiles(obj, fileFilter, func(file *object.File) (err error) {
@@ -322,69 +325,104 @@ func (qa qytApp) runQuery(repo *git.Repository) {
 			}
 
 			dmp := diffmatchpatch.New()
-			diffs := dmp.DiffMain(string(input), buf.String(), true)
+			fileContents := buf.String()
+			diffs := dmp.DiffMain(string(input), fileContents, true)
 
-			diffSegments := make([]widget.RichTextSegment, 0, len(diffs))
-			for _, d := range diffs {
-				style := widget.RichTextStyle{
-					Inline:    false,
-					SizeName:  theme.SizeNameText,
-					TextStyle: fyne.TextStyle{Monospace: true},
-				}
-				switch d.Type {
-				case diffmatchpatch.DiffDelete:
-					style.ColorName = theme.ColorNameError
-				case diffmatchpatch.DiffInsert:
-					style.ColorName = InsertColor
-				case diffmatchpatch.DiffEqual:
-					style.ColorName = theme.ColorNameForeground
-				}
-				style.Inline = !strings.HasSuffix(d.Text, "\n")
-				diffSegments = append(diffSegments, &widget.TextSegment{
-					Text:  strings.TrimSuffix(d.Text, "\n"),
-					Style: style,
-				})
-			}
-			rt := widget.NewRichText(diffSegments...)
-
-			toolbar := widget.NewToolbar()
-			toolbar.Append(widget.NewToolbarAction(theme.ContentCopyIcon(), qa.triggerCopyToClipboard))
-			contents := widget.NewRichTextWithText(buf.String())
-			contents.Wrapping = fyne.TextWrapOff
-			box := container.NewVBox(toolbar, contents)
-			box.Layout.Layout(box.Objects, fyne.NewSize(300, 400))
-
-			fileViews := container.NewAppTabs(
-				container.NewTabItem(FileViewNameResult, container.NewScroll(box)),
-				container.NewTabItem(FileViewNameDiff, container.NewScroll(rt)),
-			)
-			fileViews.OnSelected = func(item *container.TabItem) {
-				qa.selectAllFileViewsWithName(item.Text)
-			}
-			fileViews.SetTabLocation(container.TabLocationBottom)
-			fileTabs.Append(container.NewTabItem(file.Name, fileViews))
+			qa.createFilesView(fileTabs, file.Name, fileContents, diffs)
 			return nil
 		})
 		if err != nil {
-			qa.errMessage.SetText(err.Error())
-			qa.errMessage.Show()
+			qa.displayError(err)
+			continue
 		}
 	}
 	if count == 0 && err == nil {
-		qa.errMessage.SetText(fmt.Sprintf("no matching files"))
-		qa.errMessage.Show()
+		qa.displayError(fmt.Errorf("no matching files"))
+		return
 	}
 }
 
-func (qa qytApp) triggerCopyToClipboard() {
-	qa.copyRequestC <- struct{}{}
+func (qa *qytApp) createNewBranchTab(ref plumbing.Reference) *container.AppTabs {
+	qa.Lock()
+	defer qa.Unlock()
+
+	fileTabs := container.NewAppTabs()
+	bt := container.NewTabItem(ref.Name().Short(), fileTabs)
+	fileTabs.OnSelected = func(item *container.TabItem) {
+		qa.selectAllFilesWithPath(item.Text)
+	}
+	fileTabs.SetTabLocation(container.TabLocationLeading)
+	qa.branchTabs.Append(bt)
+	return fileTabs
 }
 
-func (qa qytApp) copyToClipboard() {
-	qa.window.Clipboard().SetContent(qa.selectedFileContents())
+func (qa *qytApp) clearBranchesAndError() {
+	qa.Lock()
+	defer qa.Unlock()
+
+	qa.errMessage.Hide()
+	qa.errMessage.SetText("")
+	qa.branchTabs.SetItems(nil)
 }
 
-func (qa qytApp) selectedFileContents() string {
+func (qa *qytApp) displayError(err error) {
+	qa.Lock()
+	defer qa.Unlock()
+
+	qa.errMessage.SetText(err.Error())
+	qa.errMessage.Show()
+}
+
+func (qa *qytApp) createFilesView(fileTabs *container.AppTabs, fileName, fileContents string, diffs []diffmatchpatch.Diff) {
+	qa.Lock()
+	defer qa.Unlock()
+
+	diffSegments := make([]widget.RichTextSegment, 0, len(diffs))
+	for _, d := range diffs {
+		style := widget.RichTextStyle{
+			Inline:    false,
+			SizeName:  theme.SizeNameText,
+			TextStyle: fyne.TextStyle{Monospace: true},
+		}
+		switch d.Type {
+		case diffmatchpatch.DiffDelete:
+			style.ColorName = theme.ColorNameError
+		case diffmatchpatch.DiffInsert:
+			style.ColorName = InsertColor
+		case diffmatchpatch.DiffEqual:
+			style.ColorName = theme.ColorNameForeground
+		}
+		style.Inline = !strings.HasSuffix(d.Text, "\n")
+		diffSegments = append(diffSegments, &widget.TextSegment{
+			Text:  strings.TrimSuffix(d.Text, "\n"),
+			Style: style,
+		})
+	}
+
+	rt := widget.NewRichText(diffSegments...)
+
+	toolbar := widget.NewToolbar()
+	toolbar.Append(widget.NewToolbarAction(theme.ContentCopyIcon(), func() {
+		qa.window.Clipboard().SetContent(fileContents)
+	}))
+	contents := widget.NewRichTextWithText(fileContents)
+	contents.Wrapping = fyne.TextWrapOff
+	box := container.NewVBox(toolbar, contents)
+	box.Layout.Layout(box.Objects, fyne.NewSize(300, 400))
+
+	fileViews := container.NewAppTabs(
+		container.NewTabItem(FileViewNameResult, container.NewScroll(box)),
+		container.NewTabItem(FileViewNameDiff, container.NewScroll(rt)),
+	)
+	fileViews.OnSelected = func(item *container.TabItem) {
+		qa.selectAllFileViewsWithName(item.Text)
+	}
+	fileViews.SetTabLocation(container.TabLocationBottom)
+
+	fileTabs.Append(container.NewTabItem(fileName, fileViews))
+}
+
+func (qa *qytApp) selectedFileContents() string {
 	fileViews, _, ok := qa.selectedFileViews()
 	if !ok {
 		panic("failed to get selected files")
@@ -403,7 +441,7 @@ func (qa qytApp) selectedFileContents() string {
 	return rt.String()
 }
 
-func (qa qytApp) selectedFileViews() (*container.AppTabs, string, bool) {
+func (qa *qytApp) selectedFileViews() (*container.AppTabs, string, bool) {
 	branchTab := qa.branchTabs.Selected()
 	fileTabs, ok := branchTab.Content.(*container.AppTabs)
 	if !ok {
@@ -414,7 +452,7 @@ func (qa qytApp) selectedFileViews() (*container.AppTabs, string, bool) {
 	return tabs, ft.Text, ok
 }
 
-func (qa qytApp) selectAllFilesWithPath(s string) {
+func (qa *qytApp) selectAllFilesWithPath(s string) {
 	for _, branchTab := range qa.branchTabs.Items {
 		fileTabs := branchTab.Content.(*container.AppTabs)
 		for i, fileTab := range fileTabs.Items {
@@ -426,7 +464,7 @@ func (qa qytApp) selectAllFilesWithPath(s string) {
 	}
 }
 
-func (qa qytApp) selectAllFileViewsWithName(s string) {
+func (qa *qytApp) selectAllFileViewsWithName(s string) {
 	for _, branchTab := range qa.branchTabs.Items {
 		fileTabs := branchTab.Content.(*container.AppTabs)
 		for _, fileTab := range fileTabs.Items {
@@ -441,11 +479,10 @@ func (qa qytApp) selectAllFileViewsWithName(s string) {
 	}
 }
 
-func (qa qytApp) commit(commitTemplate, branchPrefix string, existingBranches bool) {
+func (qa *qytApp) commit(commitTemplate, branchPrefix string, existingBranches bool) {
 	sig, err := getSignature(qa.repo, time.Now())
 	if err != nil {
-		qa.errMessage.SetText(err.Error())
-		qa.errMessage.Show()
+		qa.displayError(err)
 		return
 	}
 	if existingBranches {
@@ -460,8 +497,7 @@ func (qa qytApp) commit(commitTemplate, branchPrefix string, existingBranches bo
 		sig, false, existingBranches,
 	)
 	if err != nil {
-		qa.errMessage.SetText(err.Error())
-		qa.errMessage.Show()
+		qa.displayError(err)
 		return
 	}
 }
