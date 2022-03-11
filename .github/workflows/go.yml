@@ -21,8 +21,9 @@ jobs:
     - name: Build
       run: go build -v ./cmd/qyt
 
-    - name: Test Package
-      run: go test -v .
+    - name: Get dependencies
+      run: sudo apt-get update && sudo apt-get install gcc libgl1-mesa-dev libegl1-mesa-dev libgles2-mesa-dev libx11-dev xorg-dev
 
-    - name: Test Command
-      run: go test -v ./cmd/qyt
+    - name: Test Package
+      run: go test -v ./...
+
