@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"testing"
 
 	"github.com/go-git/go-billy/v5/memfs"
@@ -11,7 +12,14 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/stretchr/testify/assert"
+	"gopkg.in/op/go-logging.v1"
 )
+
+func init() {
+	backend := logging.NewLogBackend(io.Discard, "", 0)
+	logging.SetLevel(logging.CRITICAL, "github.com/mikefarah/yq/v4")
+	logging.SetBackend(backend)
+}
 
 func TestQuery(t *testing.T) {
 	fs := memfs.New()
@@ -23,7 +31,7 @@ func TestQuery(t *testing.T) {
 	createSomeFilesWithNameKey(t, repo, "b", "bar", "baz")
 
 	var out bytes.Buffer
-	queryErr := Query(&out, repo, `{"n": .name, "b": $branch, "f": $filename}`, ".*", "*.yml", false, true)
+	queryErr := Query(&out, repo, `{"n": .name, "b": $branch, "f": $filename}`, ".*", `.*\.yml`, false, true)
 	assert.NoError(t, queryErr)
 
 	dec := json.NewDecoder(&out)
