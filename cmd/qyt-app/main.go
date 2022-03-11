@@ -453,6 +453,9 @@ func (qa *qytApp) selectedFileViews() (*container.AppTabs, string, bool) {
 }
 
 func (qa *qytApp) selectAllFilesWithPath(s string) {
+	qa.Lock()
+	defer qa.Unlock()
+
 	for _, branchTab := range qa.branchTabs.Items {
 		fileTabs := branchTab.Content.(*container.AppTabs)
 		for i, fileTab := range fileTabs.Items {
@@ -465,6 +468,9 @@ func (qa *qytApp) selectAllFilesWithPath(s string) {
 }
 
 func (qa *qytApp) selectAllFileViewsWithName(s string) {
+	qa.Lock()
+	defer qa.Unlock()
+
 	for _, branchTab := range qa.branchTabs.Items {
 		fileTabs := branchTab.Content.(*container.AppTabs)
 		for _, fileTab := range fileTabs.Items {
