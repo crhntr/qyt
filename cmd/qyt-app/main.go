@@ -30,40 +30,32 @@ import (
 	"github.com/crhntr/qyt"
 )
 
-func main() {
+func init() {
 	backend := logging.NewLogBackend(io.Discard, "", 0)
 	logging.SetLevel(logging.CRITICAL, "github.com/mikefarah/yq/v4")
 	logging.SetBackend(backend)
+}
 
+func main() {
 	qytConfig, usage, err := qyt.LoadConfiguration()
 	if err != nil {
 		usage()
 		os.Exit(1)
 	}
 
-	myApp := app.New()
-	myApp.Settings().SetTheme(qytTheme{
-		Theme: theme.DefaultTheme(),
-	})
-	mainWindow := myApp.NewWindow("qyt = yq * git")
-	mainWindow.Resize(fyne.NewSize(1200, 900))
-	mainWindow.SetFixedSize(false)
-
 	repo, err := loadRepo(qytConfig)
 	if err != nil {
 		log.Fatalf("failed to load repository: %s", err)
 	}
 
-	qa := initApp(qytConfig, mainWindow, repo)
+	qa := initApp(app.New, qytConfig, repo)
 	defer qa.Close()
 	go qa.Run()
-	mainWindow.SetContent(qa.view)
-	mainWindow.ShowAndRun()
+	qa.window.ShowAndRun()
 }
 
 type qytApp struct {
 	sync.Mutex
-
 	config    qyt.Configuration
 	repo      *git.Repository
 	expParser yqlib.ExpressionParser
@@ -83,15 +75,35 @@ type qytApp struct {
 
 	branchTabs *container.AppTabs
 
+	loadRepo func(configuration qyt.Configuration) (*git.Repository, error)
+
 	queryC chan struct{}
 }
 
-func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Repository) *qytApp {
-	qa := &qytApp{
-		repo:      repo,
-		config:    config,
-		expParser: yqlib.NewExpressionParser(),
+const (
+	formLabelYAMLQuery    = "YAML Query"
+	formLabelBranchRegExp = "Branch RegExp"
+	formLabelFileRegExp   = "File RegExp"
+	formLabelCommitResult = "Commit Result"
+	formLabelMessage      = "Message"
+	formLabelNewBranches  = "New Branches"
+	formLabelBranchPrefix = "Branch Prefix"
+	formSubmitButtonText  = "Run Query"
+)
 
+func initApp(createApp func() fyne.App, config qyt.Configuration, repo *git.Repository) *qytApp {
+	myApp := createApp()
+	myApp.Settings().SetTheme(qytTheme{
+		Theme: theme.DefaultTheme(),
+	})
+	mainWindow := myApp.NewWindow("qyt = yq * git")
+	mainWindow.Resize(fyne.NewSize(1200, 900))
+	mainWindow.SetFixedSize(false)
+
+	qa := &qytApp{
+		repo:                repo,
+		config:              config,
+		expParser:           yqlib.NewExpressionParser(),
 		window:              mainWindow,
 		form:                widget.NewForm(),
 		branchEntry:         widget.NewEntry(),
@@ -167,17 +179,19 @@ func initApp(config qyt.Configuration, mainWindow fyne.Window, repo *git.Reposit
 	qa.queryEntry.SetText(qa.config.Query)
 	qa.queryC = make(chan struct{})
 
-	qa.form.SubmitText = "Run Query"
+	qa.form.SubmitText = formSubmitButtonText
 	qa.form.OnSubmit = func() {
 		qa.queryC <- struct{}{}
 	}
-	qa.form.Append("YAML Query", qa.queryEntry)
-	qa.form.Append("Branch RegExp", qa.branchEntry)
-	qa.form.Append("File RegExp", qa.pathEntry)
-	qa.form.Append("Commit Result", qa.commitResultCheckbox)
-	qa.form.Append("Message", qa.commitTemplateEntry)
-	qa.form.Append("New Branches", qa.newBranchesCheckbox)
-	qa.form.Append("Branch Prefix", qa.branchPrefixEntry)
+	qa.form.Append(formLabelYAMLQuery, qa.queryEntry)
+	qa.form.Append(formLabelBranchRegExp, qa.branchEntry)
+	qa.form.Append(formLabelFileRegExp, qa.pathEntry)
+	qa.form.Append(formLabelCommitResult, qa.commitResultCheckbox)
+	qa.form.Append(formLabelMessage, qa.commitTemplateEntry)
+	qa.form.Append(formLabelNewBranches, qa.newBranchesCheckbox)
+	qa.form.Append(formLabelBranchPrefix, qa.branchPrefixEntry)
+
+	qa.window.SetContent(qa.view)
 
 	return qa
 }
@@ -228,18 +242,15 @@ func (qa *qytApp) Close() {
 	close(qa.queryC)
 }
 
-func (qa *qytApp) Run() func() {
+func (qa *qytApp) Run() {
 	qa.runQuery(qa.repo)
 
 	defer log.Println("done running")
 
-	for {
+	for range qa.queryC {
+		qa.disableInput()
+		qa.runQuery(qa.repo)
 		qa.enableInput()
-		select {
-		case <-qa.queryC:
-			qa.disableInput()
-			qa.runQuery(qa.repo)
-		}
 	}
 }
 
@@ -453,7 +464,9 @@ func (qa *qytApp) selectedFileViews() (*container.AppTabs, string, bool) {
 }
 
 func (qa *qytApp) selectAllFilesWithPath(s string) {
-	qa.Lock()
+	if !qa.TryLock() {
+		return
+	}
 	defer qa.Unlock()
 
 	for _, branchTab := range qa.branchTabs.Items {
@@ -468,7 +481,9 @@ func (qa *qytApp) selectAllFilesWithPath(s string) {
 }
 
 func (qa *qytApp) selectAllFileViewsWithName(s string) {
-	qa.Lock()
+	if !qa.TryLock() {
+		return
+	}
 	defer qa.Unlock()
 
 	for _, branchTab := range qa.branchTabs.Items {
