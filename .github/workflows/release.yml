@@ -25,23 +25,23 @@ jobs:
 
       - name: Setup
         run: |
-          mkdir -p $GITHUB_WORKSPACE/outputs
+          mkdir -p dist
           go mod download
 
       - name: Test Packages
         run: go test -v ./...
 
       - name: Build QYT App
-        run: go build -v -o "$GITHUB_WORKSPACE/outputs/qyt-app-$(go env GOOS)-$(go env GOARCH)" "./cmd/qyt-app"
+        run: go build -v -o dist/qyt-app-$(go env GOOS)-$(go env GOARCH)" "./cmd/qyt-app"
 
       - name: Build QYT
-        run: go build -v -o "$GITHUB_WORKSPACE/outputs/qyt-app-$(go env GOOS)-$(go env GOARCH)" "./cmd/qyt"
+        run: go build -v -o dist/qyt-app-$(go env GOOS)-$(go env GOARCH)" "./cmd/qyt"
 
       - name: Save Artifacts
         uses: actions/upload-artifact@v3
         with:
           name: qyt-builds-${{ matrix.os }}-${{ github.ref }}
-          path: $GITHUB_WORKSPACE/outputs/qyt-*
+          path: dist/
 
   release:
     needs: [ build ]
