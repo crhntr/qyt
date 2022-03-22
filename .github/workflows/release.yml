@@ -32,9 +32,9 @@ jobs:
         run: go test -v ./...
 
       - name: Build QYT App
-        run: go build -v -o $GITHUB_WORKSPACE/outputs/qyt-app-$(go env GOOS)-$(go env GOARCH)" "./cmd/qyt-app"
+        run: go build -v -o "$GITHUB_WORKSPACE/outputs/qyt-app-$(go env GOOS)-$(go env GOARCH)" "./cmd/qyt-app"
 
       - name: Build QYT
-        run: go build -v -o $GITHUB_WORKSPACE/outputs/qyt-app-$(go env GOOS)-$(go env GOARCH)" "./cmd/qyt"
+        run: go build -v -o "$GITHUB_WORKSPACE/outputs/qyt-app-$(go env GOOS)-$(go env GOARCH)" "./cmd/qyt"
 
 
