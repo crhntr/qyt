@@ -35,12 +35,12 @@ jobs:
         run: go build -v -o "dist/qyt-app-$(go env GOOS)-$(go env GOARCH)" "./cmd/qyt-app"
 
       - name: Build QYT
-        run: go build -v -o "dist/qyt-app-$(go env GOOS)-$(go env GOARCH)" "./cmd/qyt"
+        run: go build -v -o "dist/qyt-$(go env GOOS)-$(go env GOARCH)" "./cmd/qyt"
 
       - name: Save Artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: qyt-builds-${{ matrix.os }}
+          name: qyt-builds-${{ matrix.os }}-${{ github.ref_name }}
           path: dist/
 
   release:
