@@ -41,7 +41,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: qyt-builds-${{ matrix.os }}-${{ github.ref }}
-          path: $GITHUB_WORKSPACE/outputs/
+          path: $GITHUB_WORKSPACE/outputs/qyt-*
 
   release:
     needs: [ build ]
