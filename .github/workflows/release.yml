@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: '1.18'
+
+      - name: Setup
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/outputs
+
+      - name: Get dependencies
+        if: matrix.os == "ubuntu-latest
+        run: sudo apt-get update && sudo apt-get install gcc libgl1-mesa-dev libegl1-mesa-dev libgles2-mesa-dev libx11-dev xorg-dev
+
+      - name: Test Packages
+        run: go test -v ./...
+
+      - name: Build QYT App
+        run: go build -v -o $GITHUB_WORKSPACE/outputs/qyt-app-$(go env GOOS)-$(go env GOARCH)" "./cmd/qyt-app
+
+      - name: Build QYT
+        run: go build -v -o $GITHUB_WORKSPACE/outputs/qyt-app-$(go env GOOS)-$(go env GOARCH)" ./cmd/qyt
+
+
