@@ -6,7 +6,7 @@ on:
       - 'v*'
 
 jobs:
-  release:
+  build:
     strategy:
       matrix:
         os: [ ubuntu-latest, macos-latest ]
@@ -37,4 +37,24 @@ jobs:
       - name: Build QYT
         run: go build -v -o "$GITHUB_WORKSPACE/outputs/qyt-app-$(go env GOOS)-$(go env GOARCH)" "./cmd/qyt"
 
+      - name: Save Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: qyt-builds-${{ matrix.os }}-${{ github.ref }}
+          path: $GITHUB_WORKSPACE/outputs/
 
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download QYT Linux
+        uses: actions/download-artifact@v2
+        with:
+          name: qyt-builds-ubuntu-latest-${{ github.ref }}
+
+      - name: Download QYT MacOS
+        uses: actions/download-artifact@v2
+        with:
+          name: qyt-builds-macos-latest-${{ github.ref }}
+
+      - name: List Stuff
+        run: ls -la .
