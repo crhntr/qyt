@@ -44,6 +44,7 @@ jobs:
           path: $GITHUB_WORKSPACE/outputs/
 
   release:
+    needs: [ build ]
     runs-on: ubuntu-latest
     steps:
       - name: Download QYT Linux
