@@ -40,7 +40,7 @@ jobs:
       - name: Save Artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: qyt-builds-${{ matrix.os }}-${{ github.ref }}
+          name: qyt-builds-${{ matrix.os }}
           path: dist/
 
   release:
@@ -50,12 +50,12 @@ jobs:
       - name: Download QYT Linux
         uses: actions/download-artifact@v2
         with:
-          name: qyt-builds-ubuntu-latest-${{ github.ref }}
+          name: qyt-builds-ubuntu-latest-${{ github.ref_name }}
 
       - name: Download QYT MacOS
         uses: actions/download-artifact@v2
         with:
-          name: qyt-builds-macos-latest-${{ github.ref }}
+          name: qyt-builds-macos-latest-${{ github.ref_name }}
 
       - name: List Stuff
         run: ls -la .
