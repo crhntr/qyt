@@ -57,5 +57,14 @@ jobs:
         with:
           name: qyt-builds-macos-latest-${{ github.ref_name }}
 
-      - name: List Stuff
-        run: ls -la .
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: QYT Release ${{ github.ref_name }}
+          prerelease: true
+          draft: false
+          files: |
+            qyt-app-darwin-amd64
+            qyt-app-linux-amd64
+            qyt-darwin-amd64
+            qyt-linux-amd64
