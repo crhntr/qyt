@@ -30,7 +30,7 @@ func TestCreateNewTreeWithFiles(t *testing.T) {
 		}
 		input := []memoryFile{
 			{Name: "skip1.txt"},
-			{Name: "dir", Mode: filemode.Dir | 0777},
+			{Name: "dir", Mode: filemode.Dir | 0o777},
 			{Name: "dir/file.txt"},
 			{Name: "skip2.txt"},
 		}
@@ -50,9 +50,9 @@ func TestCreateNewTreeWithFiles(t *testing.T) {
 		}
 		input := []memoryFile{
 			{Name: "skip1.txt"},
-			{Name: "dir_skip", Mode: filemode.Dir | 0777},
+			{Name: "dir_skip", Mode: filemode.Dir | 0o777},
 			{Name: "dir_skip/file.txt"},
-			{Name: "dir", Mode: filemode.Dir | 0777},
+			{Name: "dir", Mode: filemode.Dir | 0o777},
 			{Name: "dir/file.txt"},
 			{Name: "skip2.txt"},
 		}
@@ -72,9 +72,9 @@ func TestCreateNewTreeWithFiles(t *testing.T) {
 		}
 		input := []memoryFile{
 			{Name: "skip1.txt"},
-			{Name: "dir_skip", Mode: filemode.Dir | 0777},
+			{Name: "dir_skip", Mode: filemode.Dir | 0o777},
 			{Name: "dir_skip/file.txt"},
-			{Name: "dir", Mode: filemode.Dir | 0777},
+			{Name: "dir", Mode: filemode.Dir | 0o777},
 			{Name: "dir/file.txt"},
 			{Name: "skip2.txt"},
 		}
@@ -94,9 +94,9 @@ func TestCreateNewTreeWithFiles(t *testing.T) {
 		}
 		input := []memoryFile{
 			{Name: "skip1.txt"},
-			{Name: "dir_skip", Mode: filemode.Dir | 0777},
+			{Name: "dir_skip", Mode: filemode.Dir | 0o777},
 			{Name: "dir_skip/file.txt"},
-			{Name: "dir", Mode: filemode.Dir | 0777},
+			{Name: "dir", Mode: filemode.Dir | 0o777},
 			{Name: "dir/file.txt"},
 			{Name: "dir/sub1/file.txt"},
 			{Name: "dir/sub2/file.txt"},

@@ -610,7 +610,7 @@ func HandleMatchingFiles(obj object.Object, re *regexp.Regexp, fn func(file *obj
 			}
 			return fn(file)
 		})
-	//case *object.Blob:
+	// case *object.Blob:
 	default:
 		return object.ErrUnsupportedObject
 	}

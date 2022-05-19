@@ -40,7 +40,7 @@ func TestApply_one_branch_create_feature_branch(t *testing.T) {
 	}
 
 	for _, dir := range []string{"foo", "bar", "baz"} {
-		if !assert.NoError(t, wt.Filesystem.MkdirAll(dir, 0777)) {
+		if !assert.NoError(t, wt.Filesystem.MkdirAll(dir, 0o777)) {
 			return
 		}
 		createFile(t, wt.Filesystem, dir+"/main.yml", fmt.Sprintf("---\nlast_char: %c\n", dir[len(dir)-1]))
@@ -159,7 +159,7 @@ func TestApply_update_existing_branches(t *testing.T) {
 	}
 
 	for _, dir := range []string{"foo", "bar", "baz"} {
-		if !assert.NoError(t, wt.Filesystem.MkdirAll(dir, 0777)) {
+		if !assert.NoError(t, wt.Filesystem.MkdirAll(dir, 0o777)) {
 			return
 		}
 		createFile(t, wt.Filesystem, dir+"/main.yml", fmt.Sprintf("---\nlast_char: %c\n", dir[len(dir)-1]))
