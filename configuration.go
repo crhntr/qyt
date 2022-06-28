@@ -24,7 +24,7 @@ type Configuration struct {
 //go:embed README.md
 var readme string
 
-func LoadConfiguration() (Configuration, func(), error) {
+func LoadConfiguration(args []string) (Configuration, func(), error) {
 	fSet := flag.NewFlagSet("qyt", flag.ContinueOnError)
 
 	var c Configuration
@@ -64,7 +64,7 @@ func LoadConfiguration() (Configuration, func(), error) {
 	}
 	fSet.Usage = usage
 
-	err := fSet.Parse(os.Args[1:])
+	err := fSet.Parse(args)
 	if err != nil {
 		return c, usage, err
 	}
@@ -73,7 +73,7 @@ func LoadConfiguration() (Configuration, func(), error) {
 		return c, usage, errors.New("help requested")
 	}
 
-	args := fSet.Args()
+	args = fSet.Args()
 	if len(args) > 0 {
 		c.Query = args[0]
 	}

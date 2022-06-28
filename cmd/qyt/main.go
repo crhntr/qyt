@@ -2,6 +2,7 @@ package main
 
 import (
 	_ "embed"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -23,12 +24,13 @@ func init() {
 func main() {
 	allowOverridingExistingBranches := false
 
-	qytConfig, usage, err := qyt.LoadConfiguration()
+	flag.Parse()
+
+	qytConfig, usage, err := qyt.LoadConfiguration(flag.Args()[1:])
 	if err != nil {
 		usage()
 		os.Exit(1)
 	}
-
 	repo, err := git.PlainOpen(qytConfig.GitRepositoryPath)
 	if err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "failed to open repository", err)
@@ -36,7 +38,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	if qytConfig.CommitTemplate != "" {
+	switch flag.Arg(0) {
+	case "query":
+		err = qyt.Query(os.Stdout, repo, qytConfig.Query, qytConfig.BranchFilter, qytConfig.FileNameFilter, false, false)
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "query error: %s\n", err.Error())
+			os.Exit(1)
+		}
+	case "apply":
 		author, getSignatureErr := getSignature(repo, time.Now())
 		if getSignatureErr != nil {
 			_, _ = fmt.Fprintln(os.Stderr, "failed to open repository", getSignatureErr)
@@ -49,12 +58,6 @@ func main() {
 			os.Exit(1)
 		}
 		return
-	}
-
-	err = qyt.Query(os.Stdout, repo, qytConfig.Query, qytConfig.BranchFilter, qytConfig.FileNameFilter, false, false)
-	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "query error: %s\n", err.Error())
-		os.Exit(1)
 	}
 }
 

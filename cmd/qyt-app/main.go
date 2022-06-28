@@ -37,7 +37,7 @@ func init() {
 }
 
 func main() {
-	qytConfig, usage, err := qyt.LoadConfiguration()
+	qytConfig, usage, err := qyt.LoadConfiguration(os.Args[1:])
 	if err != nil {
 		usage()
 		os.Exit(1)

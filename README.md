@@ -10,13 +10,13 @@ See [yq docs](https://mikefarah.gitbook.io/yq/) for query syntax.
 
 ### Read the name value from every yaml file
 ```sh
-  qyt '.name' '*.yml'
+  qyt query '.name' '*.yml'
 ```
 
 ### Display the top level keys for each file on each branch
 
 ```sh
-  qyt '{"b": $branch, "fp": $filename, "keys": keys}' '*.yml'
+  qyt query '{"b": $branch, "fp": $filename, "keys": keys}' '*.yml'
 ```
 
 ## Committing Query Results
@@ -38,7 +38,7 @@ The commit message is executed as a template with a populated
 For example when you run the following command (with branches main, and rel/2.0)
 
 ```sh
-  qyt -m 'run {{printf "%q" .Query}} on {{.Branch}}' 'del(.name)' data.yml
+  qyt apply -m 'run {{printf "%q" .Query}} on {{.Branch}}' 'del(.name)' data.yml
 ```
 
 The commit messages will look like
@@ -47,7 +47,7 @@ The commit messages will look like
 ```
 and
 ```
-run "del(.name)" on rel/2.0
+  run "del(.name)" on rel/2.0
 ```
 
 See [text/templates](https://golang.org/pkg/text/template/) for template syntax.
