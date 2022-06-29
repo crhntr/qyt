@@ -259,19 +259,18 @@ const (
 	FileViewNameDiff   = "Diff"
 )
 
-func (qa *qytApp) loadFields() (*regexp.Regexp, *regexp.Regexp, *yqlib.ExpressionNode, error) {
+func (qa *qytApp) parseFields(b, f, q string) (*regexp.Regexp, *regexp.Regexp, *yqlib.ExpressionNode, error) {
 	qa.Lock()
 	defer qa.Unlock()
-
-	exp, err := qa.expParser.ParseExpression(qa.queryEntry.Text)
+	exp, err := qa.expParser.ParseExpression(q)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	fileFilter, err := regexp.Compile(qa.pathEntry.Text)
+	fileFilter, err := regexp.Compile(f)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	branchFilter, err := regexp.Compile(qa.branchEntry.Text)
+	branchFilter, err := regexp.Compile(b)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -279,7 +278,10 @@ func (qa *qytApp) loadFields() (*regexp.Regexp, *regexp.Regexp, *yqlib.Expressio
 }
 
 func (qa *qytApp) runQuery(repo *git.Repository) {
-	branchFilter, fileFilter, queryExp, err := qa.loadFields()
+	b := qa.branchEntry.Text
+	f := qa.pathEntry.Text
+	q := qa.queryEntry.Text
+	branchFilter, fileFilter, queryExp, err := qa.parseFields(b, f, q)
 	if err != nil {
 		qa.displayError(err)
 		return
@@ -295,6 +297,9 @@ func (qa *qytApp) runQuery(repo *git.Repository) {
 		if err != nil {
 			log.Fatal(err)
 		}
+		fmt.Printf("$ qyt -b %q -f %q -q %q -p %s -m %q\n", branchFilter, fileFilter, q, branchPrefix, commitTemplate)
+	} else {
+		fmt.Printf("$ qyt -b %q -f %q -q %q\n", branchFilter, fileFilter, q)
 	}
 
 	qa.clearBranchesAndError()
