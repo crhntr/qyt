@@ -20,10 +20,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func DefaultBranchRegex() *regexp.Regexp {
-	return regexp.MustCompile(`^((main)|(rel/\d+\.\d+))$`)
-}
-
 func MatchingBranches(branchPattern string, repo *git.Repository, verbose bool) ([]plumbing.Reference, error) {
 	var branches []plumbing.Reference
 

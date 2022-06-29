@@ -5,6 +5,7 @@ import (
 	"io"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -199,7 +200,7 @@ func TestApply_update_existing_branches(t *testing.T) {
 	if !assert.NoError(t,
 		Apply(repo,
 			`.greeting = "¡Holla!"`,
-			DefaultBranchRegex().String(),
+			regexp.MustCompile(`^((main)|(rel/\d+\.\d+))$`).String(),
 			`.*/main\.yml`, "set greeting\n\nQuery: {{.Query}}\n", "",
 			signature,
 			testing.Verbose(), true,
