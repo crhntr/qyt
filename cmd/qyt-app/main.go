@@ -297,9 +297,9 @@ func (qa *qytApp) runQuery(repo *git.Repository) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("$ qyt -b %q -f %q -q %q -p %s -m %q\n", branchFilter, fileFilter, q, branchPrefix, commitTemplate)
+		fmt.Printf("$ qyt apply -b %q -f %q -q %q -p %s -m %q\n", branchFilter, fileFilter, q, branchPrefix, commitTemplate)
 	} else {
-		fmt.Printf("$ qyt -b %q -f %q -q %q\n", branchFilter, fileFilter, q)
+		fmt.Printf("$ qyt query -b %q -f %q -q %q\n", branchFilter, fileFilter, q)
 	}
 
 	qa.clearBranchesAndError()
