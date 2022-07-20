@@ -10,7 +10,6 @@ import (
 	"log"
 	"os"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -24,7 +23,6 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
-	"github.com/sergi/go-diff/diffmatchpatch"
 	"gopkg.in/op/go-logging.v1"
 
 	"github.com/crhntr/qyt"
@@ -326,11 +324,7 @@ func (qa *qytApp) runQuery(repo *git.Repository) {
 				return err
 			}
 
-			dmp := diffmatchpatch.New()
-			fileContents := buf.String()
-			diffs := dmp.DiffMain(string(input), fileContents, true)
-
-			qa.createFilesView(fileTabs, file.Name, fileContents, diffs)
+			qa.createFilesView(fileTabs, file.Name, buf.String())
 			return nil
 		})
 		if err != nil {
@@ -375,33 +369,9 @@ func (qa *qytApp) displayError(err error) {
 	qa.errMessage.Show()
 }
 
-func (qa *qytApp) createFilesView(fileTabs *container.AppTabs, fileName, fileContents string, diffs []diffmatchpatch.Diff) {
+func (qa *qytApp) createFilesView(fileTabs *container.AppTabs, fileName, fileContents string) {
 	qa.Lock()
 	defer qa.Unlock()
-
-	diffSegments := make([]widget.RichTextSegment, 0, len(diffs))
-	for _, d := range diffs {
-		style := widget.RichTextStyle{
-			Inline:    false,
-			SizeName:  theme.SizeNameText,
-			TextStyle: fyne.TextStyle{Monospace: true},
-		}
-		switch d.Type {
-		case diffmatchpatch.DiffDelete:
-			style.ColorName = theme.ColorNameError
-		case diffmatchpatch.DiffInsert:
-			style.ColorName = InsertColor
-		case diffmatchpatch.DiffEqual:
-			style.ColorName = theme.ColorNameForeground
-		}
-		style.Inline = !strings.HasSuffix(d.Text, "\n")
-		diffSegments = append(diffSegments, &widget.TextSegment{
-			Text:  strings.TrimSuffix(d.Text, "\n"),
-			Style: style,
-		})
-	}
-
-	rt := widget.NewRichText(diffSegments...)
 
 	toolbar := widget.NewToolbar()
 	toolbar.Append(widget.NewToolbarAction(theme.ContentCopyIcon(), func() {
@@ -414,7 +384,6 @@ func (qa *qytApp) createFilesView(fileTabs *container.AppTabs, fileName, fileCon
 
 	fileViews := container.NewAppTabs(
 		container.NewTabItem(FileViewNameResult, container.NewScroll(box)),
-		container.NewTabItem(FileViewNameDiff, container.NewScroll(rt)),
 	)
 	fileViews.OnSelected = func(item *container.TabItem) {
 		qa.selectAllFileViewsWithName(item.Text)
