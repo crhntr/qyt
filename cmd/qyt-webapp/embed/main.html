@@ -1,0 +1,76 @@
+<main>
+    <label>
+        YAML Query
+        <textarea id="yaml-query"></textarea>
+    </label>
+
+    <label>
+        Branch Filter
+        <input id="branch-filter">
+    </label>
+
+    <div id="matching-branches"></div>
+
+    <label>
+        File Filter
+        <input id="file-filter">
+    </label>
+
+    <label>
+        Commit Result
+        <input id="commit-result" type="checkbox">
+    </label>
+
+    <label>
+        Commit Message
+        <textarea id="commit-message"></textarea>
+    </label>
+
+    <label>
+        Create New Branches
+        <input id="create-new-branches" type="checkbox">
+    </label>
+
+    <label>
+        Branch Prefix
+        <input id="branch-prefix">
+    </label>
+</main>
+<style>
+    /* ======= CSS RESET START ======= */
+    /* https://www.digitalocean.com/community/tutorials/css-minimal-css-reset */
+    html {
+    box-sizing: border-box;
+    font-size: 16px;
+    }
+    *, *:before, *:after {
+    box-sizing: inherit;
+    }
+    body, h1, h2, h3, h4, h5, h6, p, ol, ul {
+    margin: 0;
+    padding: 0;
+    font-weight: normal;
+    }
+    ol, ul { list-style: none }
+    img {
+    max-width: 100%;
+    height: auto;
+    }
+    /* ======= CSS RESET END ======= */
+</style>
+<style>
+    main {
+        padding: 1rem;
+    }
+    main>label {
+        display: block;
+        margin-bottom: 1rem;
+    }
+    main>label>* {
+        display: block;
+    }
+    main>label>input[type="checkbox"] {
+        display: inline-block;
+    }
+</style>
+

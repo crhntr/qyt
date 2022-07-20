@@ -9,17 +9,11 @@ import (
 	"reflect"
 
 	markdown "github.com/MichaelMure/go-term-markdown"
+
+	"github.com/crhntr/qyt/cmd/qyt-webapp/models"
 )
 
-type Configuration struct {
-	Query                    string `env:"QYT_QUERY_EXPRESSION"  flag:"q" default:"keys"         usage:"yq query expression it may be passed argument 1 after flags"`
-	BranchFilter             string `env:"QYT_BRANCH_FILTER"     flag:"b" default:".*"           usage:"regular expression to filter branches"`
-	FileNameFilter           string `env:"QYT_FILE_NAME_FILTER"  flag:"f" default:"(.+)\\.ya?ml" usage:"regular expression to filter file paths it may be passed argument 2 after flags"`
-	GitRepositoryPath        string `env:"QYT_REPO_PATH"         flag:"r" default:"."            usage:"path to git repository"`
-	NewBranchPrefix          string `env:"QYT_NEW_BRANCH_PREFIX" flag:"p" default:"qyt/"         usage:"prefix for new branches"`
-	CommitToExistingBranches bool   `                            flag:"o" default:"false"        usage:"commit to existing branches instead of new branches"`
-	CommitTemplate           string `env:"QYT_COMMIT_TEMPLATE"   flag:"m" default:"run yq {{printf \"%q\" .Query}} on {{.Branch}}" usage:"commit message template"`
-}
+type Configuration = models.Configuration
 
 //go:embed README.md
 var readme string

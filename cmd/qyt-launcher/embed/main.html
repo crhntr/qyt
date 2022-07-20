@@ -1,0 +1,49 @@
+<html>
+<head>
+    <script>
+        async function main() {
+            function base64ToArrayBuffer(base64) {
+                const binary_string = window.atob(base64);
+                const len = binary_string.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                    bytes[i] = binary_string.charCodeAt(i);
+                }
+                return bytes.buffer;
+            }
+
+            try {
+                const wasmExecArr = await window.__fetchAsset("embed/assets/wasm_exec.js")
+                const wasmExec = atob(wasmExecArr)
+                eval(wasmExec)
+                const go = new window.Go();
+
+                let exitCode, exitFunc = go.exit;
+                go.exit = function (code) {
+                    exitCode = code
+
+                    if (exitFunc) {
+                        exitFunc(code)
+                    }
+                }
+                window.fs.writeSync = function (fd, buf) {
+                    window.__writeSync(fd, btoa(String.fromCharCode.apply(null, buf)))
+                    return buf.length
+                }
+                const mainWASM = base64ToArrayBuffer(await window.__fetchAsset("embed/assets/main.wasm"))
+                const process = await WebAssembly.instantiate(mainWASM, go.importObject)
+
+                await go.run(process.instance)
+                __exit(exitCode)
+            } catch (err) {
+                window.__writeSync(2, btoa(`${err}`))
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            main()
+        });
+    </script>
+</head>
+<body>Loading...</body>
+</html>

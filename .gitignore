@@ -1,2 +1,4 @@
 .idea
 dist
+**/wasm_exec.js
+**/*.wasm
