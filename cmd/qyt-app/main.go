@@ -50,7 +50,7 @@ func main() {
 
 	qa := initApp(app.New, qytConfig, repo)
 	defer qa.Close()
-	go qa.Run()
+	qa.runQuery(qa.repo)
 	qa.window.ShowAndRun()
 }
 
@@ -76,8 +76,6 @@ type qytApp struct {
 	branchTabs *container.AppTabs
 
 	loadRepo func(configuration qyt.Configuration) (*git.Repository, error)
-
-	queryC chan struct{}
 }
 
 const (
@@ -177,11 +175,12 @@ func initApp(createApp func() fyne.App, config qyt.Configuration, repo *git.Repo
 	qa.branchEntry.SetText(qa.config.BranchFilter)
 	qa.pathEntry.SetText(qa.config.FileNameFilter)
 	qa.queryEntry.SetText(qa.config.Query)
-	qa.queryC = make(chan struct{})
 
 	qa.form.SubmitText = formSubmitButtonText
 	qa.form.OnSubmit = func() {
-		qa.queryC <- struct{}{}
+		qa.disableInput()
+		qa.runQuery(qa.repo)
+		qa.enableInput()
 	}
 	qa.form.Append(formLabelYAMLQuery, qa.queryEntry)
 	qa.form.Append(formLabelBranchRegExp, qa.branchEntry)
@@ -239,19 +238,6 @@ func (qa *qytApp) enableInput() {
 
 func (qa *qytApp) Close() {
 	qa.disableInput()
-	close(qa.queryC)
-}
-
-func (qa *qytApp) Run() {
-	qa.runQuery(qa.repo)
-
-	defer log.Println("done running")
-
-	for range qa.queryC {
-		qa.disableInput()
-		qa.runQuery(qa.repo)
-		qa.enableInput()
-	}
 }
 
 const (
