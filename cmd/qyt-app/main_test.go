@@ -28,7 +28,7 @@ func TestInitialPageCreated(t *testing.T) {
 		return git.Init(gitStore, gitFS)
 	}
 
-	go qa.Run()
+	go qa.window.ShowAndRun()
 
 	windowClosed := make(chan struct{})
 	go func() {
