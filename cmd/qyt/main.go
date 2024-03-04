@@ -23,7 +23,7 @@ func init() {
 
 func main() {
 	allowOverridingExistingBranches := false
-	flag.BoolVar(&allowOverridingExistingBranches, "allow-overriding-existing-branches", false, "Allow overriding existing branches")
+	flag.BoolVar(&allowOverridingExistingBranches, "allow-overriding-existing-branches", allowOverridingExistingBranches, "Allow overriding existing branches")
 	flag.Parse()
 
 	qytConfig, usage, err := qyt.LoadConfiguration(flag.Args()[1:])
