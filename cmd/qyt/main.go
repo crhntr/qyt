@@ -26,7 +26,13 @@ func main() {
 	flag.BoolVar(&allowOverridingExistingBranches, "allow-overriding-existing-branches", allowOverridingExistingBranches, "Allow overriding existing branches")
 	flag.Parse()
 
-	qytConfig, usage, err := qyt.LoadConfiguration(flag.Args()[1:])
+	args := flag.Args()
+	if len(args) <= 1 {
+		fmt.Println("Usage: qyt <command> [<args>]")
+		os.Exit(1)
+	}
+
+	qytConfig, usage, err := qyt.LoadConfiguration(args[1:])
 	if err != nil {
 		usage()
 		os.Exit(1)
