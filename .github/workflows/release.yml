@@ -50,7 +50,7 @@ jobs:
             "./cmd/qyt"
 
       - name: Save Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: qyt-builds-${{ matrix.os }}-${{ github.ref_name }}
           path: dist/
@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download Artifacts
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v6
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
