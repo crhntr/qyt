@@ -72,6 +72,6 @@ jobs:
         with:
           name: QYT Release ${{ github.ref_name }}
           prerelease: true
-          draft: false
+          draft: true
           files: |
             qyt-builds-*/qyt-*
