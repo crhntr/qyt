@@ -56,7 +56,7 @@ type qytApp struct {
 	sync.Mutex
 	config    qyt.Configuration
 	repo      *git.Repository
-	expParser yqlib.ExpressionParser
+	expParser yqlib.ExpressionParserInterface
 
 	window fyne.Window
 	view   *container.Split
@@ -99,7 +99,7 @@ func initApp(createApp func() fyne.App, config qyt.Configuration, repo *git.Repo
 	qa := &qytApp{
 		repo:                repo,
 		config:              config,
-		expParser:           yqlib.NewExpressionParser(),
+		expParser:           yqlib.ExpressionParser,
 		window:              mainWindow,
 		form:                widget.NewForm(),
 		branchEntry:         widget.NewEntry(),
@@ -165,8 +165,7 @@ func initApp(createApp func() fyne.App, config qyt.Configuration, repo *git.Repo
 		if s == "" {
 			return errors.New("empty query")
 		}
-		parser := yqlib.NewExpressionParser()
-		_, err := parser.ParseExpression(s)
+		_, err := yqlib.ExpressionParser.ParseExpression(s)
 		return err
 	}
 	qa.queryEntry.MultiLine = true

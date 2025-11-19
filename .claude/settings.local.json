@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__gopls-detached__go_workspace",
+      "mcp__gopls-detached__go_diagnostics",
+      "mcp__gopls-detached__go_file_context",
+      "mcp__gopls-detached__go_package_api",
+      "Bash(go build:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

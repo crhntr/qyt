@@ -17,8 +17,11 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/storage"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
-	"gopkg.in/yaml.v3"
 )
+
+func init() {
+	yqlib.InitExpressionParser()
+}
 
 func MatchingBranches(branchPattern string, repo *git.Repository, verbose bool) ([]plumbing.Reference, error) {
 	var branches []plumbing.Reference
@@ -55,8 +58,7 @@ type CommitMessageData struct {
 }
 
 func Query(out io.Writer, repo *git.Repository, yqExp, branchRegex, filePattern string, verbose, outputToJSON bool) error {
-	parser := yqlib.NewExpressionParser()
-	yqExpression, err := parser.ParseExpression(yqExp)
+	yqExpression, err := yqlib.ExpressionParser.ParseExpression(yqExp)
 	if err != nil {
 		return fmt.Errorf("failed to parse yq expression: %s\n", err)
 	}
@@ -121,8 +123,7 @@ func query(out io.Writer, repo *git.Repository, exp *yqlib.ExpressionNode, branc
 }
 
 func Apply(repo *git.Repository, yqExp, branchRegex, filePattern, msg, branchPrefix string, author object.Signature, verbose, allowOverridingExistingBranches bool) error {
-	parser := yqlib.NewExpressionParser()
-	yqExpression, err := parser.ParseExpression(yqExp)
+	yqExpression, err := yqlib.ExpressionParser.ParseExpression(yqExp)
 	if err != nil {
 		return fmt.Errorf("failed to parse yq expression: %s\n", err)
 	}
@@ -529,21 +530,21 @@ func memoryBlobObject(buf []byte) (_ plumbing.MemoryObject, err error) {
 }
 
 func ApplyExpression(w io.Writer, r io.Reader, exp *yqlib.ExpressionNode, filename string, variables map[string]string, outputToJSON bool) error {
-	var bucket yaml.Node
-	decoder := yaml.NewDecoder(r)
-	err := decoder.Decode(&bucket)
-	if err != nil {
-		return fmt.Errorf("failed to decode yaml: %s", err)
+	nodes := list.New()
+
+	decoder := yqlib.NewYamlDecoder(yqlib.NewDefaultYamlPreferences())
+	if err := decoder.Init(r); err != nil {
+		return err
 	}
+	candidateNode, err := decoder.Decode()
+	if err != nil {
+		return err
+	}
+	candidateNode.SetFilename(filename)
+	candidateNode.EvaluateTogether = true
 
 	navigator := yqlib.NewDataTreeNavigator()
-
-	nodes := list.New()
-	nodes.PushBack(&yqlib.CandidateNode{
-		Filename:         filename,
-		Node:             &bucket,
-		EvaluateTogether: true,
-	})
+	nodes.PushBack(candidateNode)
 
 	ctx := yqlib.Context{
 		MatchingNodes: nodes,
@@ -557,7 +558,21 @@ func ApplyExpression(w io.Writer, r io.Reader, exp *yqlib.ExpressionNode, filena
 		return fmt.Errorf("yq operation failed: %w", err)
 	}
 
-	printer := yqlib.NewPrinter(w, outputToJSON, false, false, 2, true)
+	var encoder yqlib.Encoder
+	if outputToJSON {
+		encoder = yqlib.NewJSONEncoder(yqlib.JsonPreferences{
+			Indent:       2,
+			UnwrapScalar: true,
+		})
+	} else {
+		encoder = yqlib.NewYamlEncoder(yqlib.YamlPreferences{
+			Indent:             2,
+			PrintDocSeparators: true,
+			UnwrapScalar:       true,
+		})
+	}
+	printerWriter := yqlib.NewSinglePrinterWriter(w)
+	printer := yqlib.NewPrinter(encoder, printerWriter)
 
 	err = printer.PrintResults(result.MatchingNodes)
 	if err != nil {
@@ -570,15 +585,16 @@ func ApplyExpression(w io.Writer, r io.Reader, exp *yqlib.ExpressionNode, filena
 func scopeVariable(value string) *list.List {
 	nodes := list.New()
 
-	var bucket yaml.Node
-	decoder := yaml.NewDecoder(strings.NewReader(fmt.Sprintf("%q", value)))
-	err := decoder.Decode(&bucket)
+	dec := yqlib.NewYamlDecoder(yqlib.NewDefaultYamlPreferences())
+	if err := dec.Init(strings.NewReader(fmt.Sprintf("%q", value))); err != nil {
+		panic(fmt.Sprintf("failed to decode yaml: %s", err))
+	}
+	candidateNode, err := dec.Decode()
 	if err != nil {
 		panic(fmt.Sprintf("failed to decode yaml: %s", err))
 	}
-	nodes.PushBack(&yqlib.CandidateNode{
-		Node: &bucket,
-	})
+
+	nodes.PushBack(candidateNode)
 
 	return nodes
 }
