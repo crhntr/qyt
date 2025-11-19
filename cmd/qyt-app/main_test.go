@@ -111,7 +111,7 @@ func writeYAML(t *testing.T, repo *git.Repository, fileName, fileContent string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = fmt.Fprintf(f, fileContent)
+	_, err = fmt.Fprint(f, fileContent)
 	if err != nil {
 		t.Fatal(err)
 	}
