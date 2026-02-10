@@ -6,7 +6,7 @@ require (
 	fyne.io/fyne/v2 v2.7.1
 	github.com/MichaelMure/go-term-markdown v0.1.4
 	github.com/go-git/go-billy/v5 v5.7.0
-	github.com/go-git/go-git/v5 v5.16.4
+	github.com/go-git/go-git/v5 v5.16.5
 	github.com/mikefarah/yq/v4 v4.50.1
 	github.com/stretchr/testify v1.11.1
 	go.yaml.in/yaml/v4 v4.0.0-rc.3
