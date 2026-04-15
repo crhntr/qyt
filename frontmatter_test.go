@@ -1,9 +1,15 @@
 package qyt
 
 import (
+	"bytes"
 	"testing"
 
+	"github.com/go-git/go-billy/v5/memfs"
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/stretchr/testify/assert"
+	"go.yaml.in/yaml/v4"
 )
 
 func TestSplitFrontmatter(t *testing.T) {
@@ -45,6 +51,122 @@ func TestSplitFrontmatter(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestQuery_markdown tests that Query on .md files outputs the frontmatter expression result.
+func TestQuery_markdown(t *testing.T) {
+	repo, wt := newMemRepo(t)
+	sig := someSignature()
+
+	createInitialCommitOnMain(t, wt)
+	assert.NoError(t, repo.Storer.RemoveReference(plumbing.Master))
+
+	content := "---\ntitle: Hello World\ndate: 2024-01-01\n---\n# Hello World\nThis is the body.\n"
+	createFile(t, wt.Filesystem, "post.md", content)
+	_, addErr := wt.Add("post.md")
+	assert.NoError(t, addErr)
+	_, commitErr := wt.Commit("add post.md", &git.CommitOptions{Author: &sig, Committer: &sig})
+	assert.NoError(t, commitErr)
+
+	var out bytes.Buffer
+	queryErr := Query(&out, repo, `.title`, `main`, `.*\.md`, false, false)
+	assert.NoError(t, queryErr)
+
+	result := out.String()
+	assert.Contains(t, result, "Hello World")
+	assert.NotContains(t, result, "# Hello World")
+	assert.NotContains(t, result, "This is the body")
+}
+
+// TestApply_markdown_updates_frontmatter_preserves_body tests that Apply on .md files
+// updates the frontmatter and preserves the body.
+func TestApply_markdown_updates_frontmatter_preserves_body(t *testing.T) {
+	repo, wt := newMemRepo(t)
+	sig := someSignature()
+
+	createInitialCommitOnMain(t, wt)
+	assert.NoError(t, repo.Storer.RemoveReference(plumbing.Master))
+
+	originalContent := "---\ntitle: Hello\n---\n# Body stays\n"
+	createFile(t, wt.Filesystem, "post.md", originalContent)
+	_, addErr := wt.Add("post.md")
+	assert.NoError(t, addErr)
+	_, commitErr := wt.Commit("add post.md", &git.CommitOptions{Author: &sig, Committer: &sig})
+	assert.NoError(t, commitErr)
+
+	applyErr := Apply(repo, `.title = "Updated"`, `main`, `.*\.md`, "update title", "updated-", sig, false, false)
+	assert.NoError(t, applyErr)
+
+	updatedRef, refErr := repo.Storer.Reference(plumbing.NewBranchReferenceName("updated-main"))
+	if !assert.NoError(t, refErr) {
+		return
+	}
+
+	checkoutErr := wt.Checkout(&git.CheckoutOptions{Branch: updatedRef.Name()})
+	if !assert.NoError(t, checkoutErr) {
+		return
+	}
+
+	f, openErr := wt.Filesystem.Open("post.md")
+	if !assert.NoError(t, openErr) {
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	var buf bytes.Buffer
+	_, copyErr := buf.ReadFrom(f)
+	assert.NoError(t, copyErr)
+
+	updatedContent := buf.String()
+	assert.Contains(t, updatedContent, "title: Updated")
+	assert.Contains(t, updatedContent, "# Body stays")
+
+	// Validate that the frontmatter is still valid YAML
+	fm, body, ok := SplitFrontmatter([]byte(updatedContent))
+	assert.True(t, ok)
+	assert.Contains(t, string(body), "# Body stays")
+
+	var data map[string]any
+	assert.NoError(t, yaml.Unmarshal(fm, &data))
+	assert.Equal(t, "Updated", data["title"])
+}
+
+// TestApply_markdown_no_frontmatter_no_commit tests that Apply on .md with no frontmatter
+// does not create a commit.
+func TestApply_markdown_no_frontmatter_no_commit(t *testing.T) {
+	repo, wt := newMemRepo(t)
+	sig := someSignature()
+
+	createInitialCommitOnMain(t, wt)
+	assert.NoError(t, repo.Storer.RemoveReference(plumbing.Master))
+
+	// MD file with no frontmatter
+	createFile(t, wt.Filesystem, "readme.md", "# Just a heading\nNo frontmatter here.\n")
+	_, addErr := wt.Add("readme.md")
+	assert.NoError(t, addErr)
+	_, commitErr := wt.Commit("add readme.md", &git.CommitOptions{Author: &sig, Committer: &sig})
+	assert.NoError(t, commitErr)
+
+	applyErr := Apply(repo, `.title = "Updated"`, `main`, `.*\.md`, "update title", "nofm-", sig, false, false)
+	assert.NoError(t, applyErr)
+
+	// No branch should have been created
+	_, refErr := repo.Storer.Reference(plumbing.NewBranchReferenceName("nofm-main"))
+	assert.Error(t, refErr, "expected no branch to be created when no frontmatter exists")
+}
+
+func newMemRepo(t *testing.T) (*git.Repository, *git.Worktree) {
+	t.Helper()
+	fs := memfs.New()
+	repo, initErr := git.Init(memory.NewStorage(), fs)
+	if !assert.NoError(t, initErr) {
+		t.FailNow()
+	}
+	wt, wtErr := repo.Worktree()
+	if !assert.NoError(t, wtErr) {
+		t.FailNow()
+	}
+	return repo, wt
 }
 
 func TestIsMarkdownFile(t *testing.T) {
