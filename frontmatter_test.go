@@ -118,13 +118,11 @@ func TestApply_markdown_updates_frontmatter_preserves_body(t *testing.T) {
 	assert.NoError(t, copyErr)
 
 	updatedContent := buf.String()
-	assert.Contains(t, updatedContent, "title: Updated")
-	assert.Contains(t, updatedContent, "# Body stays")
 
-	// Validate that the frontmatter is still valid YAML
+	// Validate structure: only frontmatter changed, body is identical
 	fm, body, ok := SplitFrontmatter([]byte(updatedContent))
 	assert.True(t, ok)
-	assert.Contains(t, string(body), "# Body stays")
+	assert.Equal(t, "# Body stays\n", string(body))
 
 	var data map[string]any
 	assert.NoError(t, yaml.Unmarshal(fm, &data))
@@ -138,7 +136,6 @@ func TestApply_markdown_no_frontmatter_no_commit(t *testing.T) {
 	sig := someSignature()
 
 	createInitialCommitOnMain(t, wt)
-	assert.NoError(t, repo.Storer.RemoveReference(plumbing.Master))
 
 	// MD file with no frontmatter
 	createFile(t, wt.Filesystem, "readme.md", "# Just a heading\nNo frontmatter here.\n")

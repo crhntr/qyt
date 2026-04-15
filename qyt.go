@@ -105,8 +105,7 @@ func query(out io.Writer, repo *git.Repository, exp *yqlib.ExpressionNode, branc
 			applyExpressionErr := ApplyExpression(&buf, rc, exp, file.Name, map[string]string{
 				"branch":   branch.Name().Short(),
 				"filename": file.Name,
-				"head":     branch.Hash().String(),
-			}, outputToJSON)
+				"head":     branch.Hash().String(),	}, outputToJSON, false)
 			if applyExpressionErr != nil {
 				return fmt.Errorf("could not apply yq operation to file %q on %s: %s", file.Name, branch.Name(), applyExpressionErr)
 			}
@@ -138,7 +137,10 @@ func Apply(repo *git.Repository, yqExp, branchRegex, filePattern, msg, branchPre
 		return fmt.Errorf("failed to parse file name pattern: %s\n", err)
 	}
 
-	return apply(repo, yqExpression, branches, author, verbose, allowOverridingExistingBranches, fp, msg, branchPrefix, yqExp)
+	if err := apply(repo, yqExpression, branches, author, verbose, allowOverridingExistingBranches, fp, msg, branchPrefix, yqExp); err != nil {
+		return fmt.Errorf("apply: %w", err)
+	}
+	return nil
 }
 
 func apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.Reference, author object.Signature, verbose, allowOverridingExistingBranches bool, filePattern *regexp.Regexp, msg, branchPrefix, expString string) error {
@@ -165,10 +167,10 @@ func apply(repo *git.Repository, exp *yqlib.ExpressionNode, branches []plumbing.
 			allowOverridingExistingBranches, verbose)
 
 		if applyOnBranchErr != nil {
-			return applyOnBranchErr
+			return fmt.Errorf("branch %s: %w", branch.Name().Short(), applyOnBranchErr)
 		}
 
-		if commitObj.Hash().IsZero() {
+		if blobObjects == nil {
 			continue
 		}
 
@@ -275,7 +277,7 @@ func applyOnBranch(
 
 		var out bytes.Buffer
 
-		applyExpressionErr := ApplyExpression(&out, bytes.NewReader(in), exp, file.Name, NewScope(branch, file), false)
+		applyExpressionErr := ApplyExpression(&out, bytes.NewReader(in), exp, file.Name, NewScope(branch, file), false, true)
 
 		if applyExpressionErr != nil {
 			return applyExpressionErr
@@ -529,7 +531,35 @@ func memoryBlobObject(buf []byte) (_ plumbing.MemoryObject, err error) {
 	return obj, nil
 }
 
-func ApplyExpression(w io.Writer, r io.Reader, exp *yqlib.ExpressionNode, filename string, variables map[string]string, outputToJSON bool) error {
+func ApplyExpression(w io.Writer, r io.Reader, exp *yqlib.ExpressionNode, filename string, variables map[string]string, outputToJSON, preserveBody bool) error {
+	if IsMarkdownFile(filename) {
+		source, readErr := io.ReadAll(r)
+		if readErr != nil {
+			return readErr
+		}
+		fm, body, ok := SplitFrontmatter(source)
+		if !ok {
+			if preserveBody {
+				_, err := w.Write(source)
+				return err
+			}
+			return nil
+		}
+		var yqOut bytes.Buffer
+		if err := applyYQExpression(&yqOut, bytes.NewReader(fm), exp, filename, variables, outputToJSON); err != nil {
+			return err
+		}
+		if preserveBody {
+			_, err := fmt.Fprintf(w, "---\n%s---\n%s", yqOut.String(), body)
+			return err
+		}
+		_, err := io.Copy(w, &yqOut)
+		return err
+	}
+	return applyYQExpression(w, r, exp, filename, variables, outputToJSON)
+}
+
+func applyYQExpression(w io.Writer, r io.Reader, exp *yqlib.ExpressionNode, filename string, variables map[string]string, outputToJSON bool) error {
 	nodes := list.New()
 
 	decoder := yqlib.NewYamlDecoder(yqlib.NewDefaultYamlPreferences())

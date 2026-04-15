@@ -318,7 +318,7 @@ func (qa *qytApp) runQuery(repo *git.Repository) {
 				return err
 			}
 			buf.Reset()
-			err = qyt.ApplyExpression(buf, bytes.NewReader(input), queryExp, file.Name, qyt.NewScope(ref, file), false)
+			err = qyt.ApplyExpression(buf, bytes.NewReader(input), queryExp, file.Name, qyt.NewScope(ref, file), false, false)
 			if err != nil {
 				return err
 			}
